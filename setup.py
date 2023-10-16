@@ -8,3 +8,4 @@ setup(
     author_email='yuc211@ucsd.edu',
     packages=['DupCaller']
     install_requires = ''
+)
