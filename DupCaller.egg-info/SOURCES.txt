@@ -1,0 +1,13 @@
+README.md
+setup.py
+DupCaller/DupCallerCall.py
+DupCaller/DupCallerTrim.py
+DupCaller.egg-info/PKG-INFO
+DupCaller.egg-info/SOURCES.txt
+DupCaller.egg-info/dependency_links.txt
+DupCaller.egg-info/requires.txt
+DupCaller.egg-info/top_level.txt
+DupCaller/DCutils/__init__.py
+DupCaller/DCutils/callBamRegionFilter.py
+DupCaller/DCutils/splitBamRegions.py
+DupCaller/DCutils/utils.py

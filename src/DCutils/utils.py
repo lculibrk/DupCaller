@@ -1,5 +1,3 @@
-import random
-import math
 from subprocess import check_output
 import subprocess
 from scipy.stats import binom
@@ -127,11 +125,6 @@ def extractDepthIndel(bam,chrom,pos,ref,alt):
     refAlleleCount = len(refReadBarcodes.keys())
     depth = altAlleleCount + refAlleleCount
     return altAlleleCount,refAlleleCount,depth
-
-def calculateSomaticScore(ta,tr,tdp):
-    if ta == tdp: return 0
-    somaticP = - math.log10(binom.cdf(ta,tdp,0.5))
-    return somaticP
 
 def createVcfStrings(chromDict,infoDict,formatDict,filterDict,recs):
     lines = ["##fileformat=VCFv4.2"]

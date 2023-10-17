@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 from DCutils.splitBamRegions import splitBamRegions
 from DCutils.callBamRegionFilter import callBam
 from DCutils.utils import createVcfStrings
@@ -26,7 +28,7 @@ if __name__ == "__main__":
     parser.add_argument('-p','--threads',type=int,help='prefix of the output files',default = 1)
     parser.add_argument('-ae','--amperr',type=float,help='estimated polymerase error rate',default = 1E-5)
     parser.add_argument('-mr','--mutRate',type=float,help='estimated somatic mutation rate per base',default = 2.5E-7)
-    parser.add_argument('-t','--threshold',type=float,help='log likelihood ratio threshold of making a mutation call',default = 0.99)
+    parser.add_argument('-t','--threshold',type=float,help='log likelihood ratio threshold of making a mutation call',default = 2)
     parser.add_argument('-mq','--mapq',type=float,help='minumum mapq for an alignment to be considered',default = 30)
     #parser.add_argument('-da','--damage',type=float,default=5E-7)
 

@@ -6,6 +6,6 @@ setup(
     url='https://github.com/AlexandrovLab/DupCaller',
     author='Yuhe Cheng',
     author_email='yuc211@ucsd.edu',
-    packages=['DupCaller']
-    install_requires = ''
+    scripts = ["DupCaller/DupCallerCall.py","DupCaller/DupCallerTrim.py"],
+    install_requires = ['biopython>=1.78','pysam>=0.19.0','numpy>=1.21.5']
 )

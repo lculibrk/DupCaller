@@ -1,8 +1,10 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import argparse 
 from Bio import SeqIO
 import pysam
 import numpy as np
-import scipy as sp
 import re
 from pysam import AlignmentFile as BAM
 from pysam import VariantFile as VCF
@@ -596,8 +598,8 @@ def callBam(params,processNo,chunkSize):
                                 "infos":{"RP5":readPos5p,"RP3":readPos3p,"F1R2":F1R2,"F2R1":F2R1, \
                                 "TG":F1R2_ARLR[muts_ind[nn]], \
                                 "BG":F2R1_ARLR[muts_ind[nn]], \
-                                "TC":",".join(F1R2_count[:,muts_ind[nn]].tolist()), \
-                                "BC":",".join(F2R1_count[:,muts_ind[nn]].tolist())}, \
+                                "TC":",".join([str(_) for _ in F1R2_count[:,muts_ind[nn]].tolist()]), \
+                                "BC":",".join([str(_) for _ in F2R1_count[:,muts_ind[nn]].tolist()])}, \
                                 "formats":['AC',"RC","DP"],"samples":[[ta,tr,tdp],[na,nr,ndp]]}
                             muts_dict['_'.join([mut_chrom,str(mut_pos),mut_ref,mut_alt])] = 0
                             muts.append(mut) 
@@ -744,8 +746,8 @@ def callBam(params,processNo,chunkSize):
                             "infos":{"RP5":readPos5p,"RP3":readPos3p,"F1R2":F1R2,"F2R1":F2R1, \
                             "TG":F1R2_ARLR[muts_ind[nn]], \
                             "BG":F2R1_ARLR[muts_ind[nn]], \
-                            "TC":",".join(F1R2_count[:,muts_ind[nn]].tolist()), \
-                            "BC":",".join(F2R1_count[:,muts_ind[nn]].tolist())}, \
+                            "TC":",".join([str(_) for _ in F1R2_count[:,muts_ind[nn]].tolist()]), \
+                            "BC":",".join([str(_) for _ in F2R1_count[:,muts_ind[nn]].tolist()])}, \
                             "formats":['AC',"RC","DP"],"samples":[[ta,tr,tdp],[na,nr,ndp]]}
                         muts_dict['_'.join([mut_chrom,str(mut_pos),mut_ref,mut_alt])] = 0
                         muts.append(mut) 
