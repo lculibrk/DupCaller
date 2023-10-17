@@ -165,6 +165,15 @@ if __name__ == "__main__":
         pool.terminate()
         pool.join()
         mutsAll = sum(muts,[])
+        muts_positions = [mut["chrom"]+str(mut["pos"])+mut["ref"]+mut["alt"] for mut in mutsAll]
+        muts_dict = dict()
+        take_ind = list()
+        for nnn,mut in enumerate(muts_positions):
+            if muts_dict.get(mut) is None:
+                take_ind.append(nnn)
+                muts_dict[mut] = 1
+        mutsAll_new = [mutsAll[ind] for ind in take_ind]
+        mutsAll = mutsAll_new
         muts_num = len(mutsAll)
         coverage = sum(coverages)
         rec_num = sum(rec_nums)
