@@ -79,7 +79,7 @@ if __name__ == "__main__":
         "--trimR",
         type=int,
         help="ignore mutation if it is less than n bps from ends of read",
-        default=8,
+        default=15,
     )
     parser.add_argument(
         "-d",
