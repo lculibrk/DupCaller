@@ -4,6 +4,7 @@ DupCaller/DupCallerCall.py
 DupCaller/DupCallerTrim.py
 src/DCutils/__init__.py
 src/DCutils/callBamRegionFilter.py
+src/DCutils/funcs.py
 src/DCutils/splitBamRegions.py
 src/DCutils/utils.py
 src/DupCaller.egg-info/PKG-INFO

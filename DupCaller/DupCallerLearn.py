@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 from DCutils.splitBamRegions import splitBamRegions
 from DCutils.callBamRegionFilter import callBam
-from DCutils.funcs import createVcfStrings
+from DCutils.utils import createVcfStrings
 
 import argparse
 from collections import OrderedDict
@@ -12,9 +12,6 @@ from multiprocessing import Pool
 from pysam import AlignmentFile as BAM
 import pysam
 import time
-from matplotlib import pyplot as plt
-import matplotlib.patches as mpatches
-import numpy as np
 
 
 if __name__ == "__main__":
@@ -38,61 +35,14 @@ if __name__ == "__main__":
         "-p", "--threads", type=int, help="prefix of the output files", default=1
     )
     parser.add_argument(
-        "-ae",
-        "--amperr",
-        type=float,
-        help="estimated polymerase error rate",
-        default=1e-5,
-    )
-    parser.add_argument(
-        "-mr",
-        "--mutRate",
-        type=float,
-        help="estimated somatic mutation rate per base",
-        default=2.5e-7,
-    )
-    parser.add_argument(
-        "-t",
-        "--threshold",
-        type=float,
-        help="log likelihood ratio threshold of making a mutation call",
-        default=2,
-    )
-    parser.add_argument(
         "-mq",
         "--mapq",
         type=float,
         help="minumum mapq for an alignment to be considered",
         default=30,
     )
-    # parser.add_argument('-da','--damage',type=float,default=5E-7)
 
-    parser.add_argument("-n", "--normalBam", type=str, help="deduplicated normal bam")
     parser.add_argument("-m", "--noise", type=str, help="noise mask")
-    parser.add_argument("-c", "--ncoverage", type=str, help="coverage bed of ")
-    parser.add_argument(
-        "-tt",
-        "--trimF",
-        type=int,
-        help="ignore mutation if it is less than n bps from ends of template",
-        default=30,
-    )
-    parser.add_argument(
-        "-tr",
-        "--trimR",
-        type=int,
-        help="ignore mutation if it is less than n bps from ends of read",
-        default=15,
-    )
-    parser.add_argument(
-        "-d",
-        "--minNdepth",
-        type=int,
-        help="minumum coverage in normal for called variants",
-        default=10,
-    )
-    parser.add_argument("-nad", "--maxAltCount", type=int, default=0)
-    parser.add_argument("-maf", "--maxAF", type=int, default=0.1)
 
     args = parser.parse_args()
 
@@ -107,17 +57,8 @@ if __name__ == "__main__":
         "output": args.output,
         "regions": args.regions,
         "threads": args.threads,
-        "amperr": args.amperr,
-        "mutRate": args.mutRate,
-        "pcutoff": args.threshold,
         "mapq": args.mapq,
         "noise": args.noise,
-        "trim5": args.trimF,
-        "trim3": args.trimR,  # "trim5DBS": args.trim5DBS,\
-        # "trim3DBS": args.trim3DBS,\
-        "minNdepth": args.minNdepth,
-        "maxAltCount": args.maxAltCount,
-        "ncoverage": args.ncoverage,  # "damage": args.damage
     }
     """
     Initialze run
@@ -127,8 +68,6 @@ if __name__ == "__main__":
     startTime = time.time()
     if not os.path.exists("tmp"):
         os.mkdir("tmp")
-    if not os.path.exists(params["output"]):
-        os.mkdir(params["output"])
     bamObject = BAM(args.bam, "rb")
 
     """
@@ -262,13 +201,7 @@ if __name__ == "__main__":
         duplex_combinations.sort()
         duplex_read_num = OrderedDict(
             {
-                num: sum([d.get(num, [0,0])[0] for d in duplex_read_nums])
-                for num in duplex_combinations
-            }
-        )
-        duplex_coverage_by_group = OrderedDict(
-            {
-                num: sum([d.get(num, [0,0])[1] for d in duplex_read_nums])
+                num: sum([d.get(num, 0) for d in duplex_read_nums])
                 for num in duplex_combinations
             }
         )
@@ -294,6 +227,8 @@ if __name__ == "__main__":
         "BG": [1, "Float", "Alt/Ref log likelihood ratio of bottom strand"],
         "TC": [4, "Integer", "Top strand base count"],
         "BC": [4, "Float", "Bottom strand base count"],
+        "BC": [4, "Integer", "Top strand base count"],
+        "BC": [4, "Float", "Bottom strand base count"],
     }
     formatDict = {
         "AC": [1, "Integer", "Count of alt allele"],
@@ -302,66 +237,23 @@ if __name__ == "__main__":
     }
     filterDict = {"PASS": "All filter Passed"}
     vcfLines = createVcfStrings(chromDict, infoDict, formatDict, filterDict, mutsAll)
-    with open(args.output + "/"+args.output+".vcf", "w") as vcf:
+    with open(args.output + ".vcf", "w") as vcf:
         vcf.write(vcfLines)
 
-    burden_naive = muts_num / coverage
+    burden = muts_num / coverage
     efficiency = duplex_num / rec_num
 
-
-    with open(params["output"] + "/"+args.output+"_duplex_group_stats.txt", "w") as f:
-        f.write(f"duplex_group_strand_composition\tduplex_group_number\teffective_coverage\tmutation_count\n")
-        muts_by_duplex_group = OrderedDict()
-        non_zero_keys = []
-        for read_num in duplex_read_num.keys():
-            if duplex_read_num[read_num] != 0:
-                non_zero_keys.append(read_num)
-            muts_by_duplex_group[read_num] = 0
-        for mut in mutsAll:
-            TC_total = int(mut["infos"]["F1R2"])
-            BC_total = int(mut["infos"]["F2R1"])
-            if muts_by_duplex_group.get(str(TC_total) + '+' + str(BC_total)) is not None:
-                muts_by_duplex_group[str(TC_total) + '+' + str(BC_total)] += 1
-            else:
-                muts_by_duplex_group[str(BC_total) + '+' + str(TC_total)] += 1
-        for read_num in non_zero_keys:
-            f.write(f"{read_num}\t{duplex_read_num[read_num]}\t{duplex_coverage_by_group[read_num]}\t{muts_by_duplex_group[read_num]}\n")
-    
-    muts_by_group = np.loadtxt(params["output"] + "/"+args.output+"_duplex_group_stats.txt",skiprows=1,dtype=float,delimiter='\t',usecols=(2,3)).transpose()
-    burden_lstsq = np.linalg.lstsq(np.vstack([muts_by_group[0,:], np.ones(muts_by_group.shape[1])]).T,muts_by_group[1,:])[0][0]
-    bootstrap_lstsqs = []
-    for _ in range(10000):
-        muts_by_group_resampled = np.random.default_rng().choice(muts_by_group,muts_by_group.shape[1],axis=1)
-        burden_lstsq_resampled = np.linalg.lstsq(np.vstack([muts_by_group_resampled[0,:], np.ones(muts_by_group.shape[1])]).T,muts_by_group_resampled[1,:])[0][0]
-        bootstrap_lstsqs.append(burden_lstsq_resampled)
-    bootstrap_lstsqs.sort()
-    burden_lstsq_lci = bootstrap_lstsqs[250]
-    burden_lstsq_uci = bootstrap_lstsqs[9750]
-    x = np.linspace(0,muts_by_group[0,:].max()*1.1)
-    plt.scatter(muts_by_group[0,:],muts_by_group[1,:])
-    plt.plot(x,burden_lstsq*x,color='r')
-    plt.plot(x,burden_lstsq_lci*x,color='r',linestyle='dashed')
-    plt.plot(x,burden_lstsq_uci*x,color='r',linestyle='dashed')
-    plt.plot(x,burden_naive*x,color='b')
-    plt.xlabel("Coverage")
-    plt.ylabel("Mutation Count")
-    lgd1 = mpatches.Patch(color='red', label='Least Square')
-    lgd2 = mpatches.Patch(color='blue', label='Naive')
-    plt.legend(handles=[lgd1,lgd2])
-    plt.savefig(params["output"] + "/"+args.output+"_burden_by_duplex_group_size.png")
-
-    with open(params["output"] + "/"+args.output+"_summary.txt", "w") as f:
+    with open(params["output"] + "_summary.txt", "w") as f:
         f.write(f"Number of Mutations\t{muts_num}\n")
         f.write(f"Effective Coverage\t{coverage}\n")
-        f.write(f"Estimated Naive Burden\t{burden_naive}\n")
-        f.write(f"Estimated Least-square Burden\t{burden_lstsq}\n")
-        f.write(f"Least-square Burden Upper 95% CI\t{burden_lstsq_uci}\n")
-        f.write(f"Least-square Burden Lower 95% CI\t{burden_lstsq_lci}\n")
-        f.write(f"Duplex Group Number\t{duplex_num}\n")
+        f.write(f"Estimated Burden\t{burden}\n")
+        f.write(f"Duplex read number\t{duplex_num}\n")
         f.write(f"Efficiency\t{efficiency}\n")
-        f.write(f"Per Duplex Group Coverage \t{coverage/duplex_num}\n")       
 
-    
+    with open(params["output"] + "_duplex_group_stats.txt", "w") as f:
+        f.write(f"Duplex Group Strand Composition\tDuplex Group Number\n")
+        for read_num in duplex_read_num.keys():
+            f.write(f"{read_num}\t{duplex_read_num[read_num]}\n")
 
     print(
         "..............Completed variant calling "
