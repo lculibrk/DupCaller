@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from DCutils.splitBamRegions import splitBamRegions
-from DCutils.callBamRegionFilter import callBam
+from DCutils.call import callBam
 from DCutils.funcs import createVcfStrings
 
 import argparse

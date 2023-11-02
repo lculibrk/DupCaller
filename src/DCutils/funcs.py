@@ -216,7 +216,7 @@ def createVcfStrings(chromDict, infoDict, formatDict, filterDict, recs):
         lines.append("\t".join(lineEntries))
     return "\n".join(lines) + "\n"
 
-
+"""
 def checkCallablity(F1R2, F2R1, F1R2BQ, F2R1BQ, mutRate, perror, pcut):
     mockFBaseProb = genotypeProbSnv(
         ["A"] * F1R2, F1R2BQ, [mutRate, mutRate, mutRate, 1 - 3 * mutRate], perror
@@ -227,6 +227,7 @@ def checkCallablity(F1R2, F2R1, F1R2BQ, F2R1BQ, mutRate, perror, pcut):
     if mockFBaseProb[3] <= pcut and mockRBaseProb[3] <= pcut:
         return True
     return False
+"""
 
 """
 def calculateMismatches(seqs,referenceSequence):
@@ -577,34 +578,19 @@ def genotypeDSIndel(seqs, bam, params):
         params,
     )
     m, n = F1R2_gt.shape
-    # pairwise = np.repeat(F1R2_gt.reshape((m,n,1)),4,axis=2) + np.repeat(F2R1_gt.reshape((m,1,n)),4,axis=1)
     log_gt_mat_masked = np.zeros([m, 4])
     consensus_gt = np.logical_and(F1R2_gt >= 0.95, F2R1_gt >= 0.95, dtype=int)
-
-    """
-    for nn in range(0,4):
-        ind_no_nn = [0,1,2,3]
-        ind_no_nn.remove(nn)
-        damage_prob_mat = np.zeros([4,4])
-        damage_prob_mat[nn,nn] = 2 * log_prob_nodamage 
-        damage_prob_mat[ind_no_nn,nn] = log_prob_nodamage + log_prob_damage
-        damage_prob_mat[nn,ind_no_nn] = log_prob_nodamage + log_prob_damage
-        damage_prob_mat[ind_no_nn,ind_no_nn] = 2 * log_prob_damage 
-        pairwise_nn = pairwise + np.repeat(damage_prob_mat.reshape([1,4,4]),m,axis=0)
-        log_per_base_prob = log10(((power10(pairwise_nn)).sum(axis=2).sum(axis=1)))
-        log_gt_mat_masked[:,nn] = log_per_base_prob + log_prior[antimask,nn]
-    """
-    # gt_mat_masked = power10(log_gt_mat_masked)
-    # log_gt_mat_masked = log10(gt_mat_masked / gt_mat_masked.sum(axis=1,keepdims=True))
     gt_mat[antimask, :] = consensus_gt
     return gt_mat
 
-def profileTriNucMismatches(seqs,reference_int,chrom,start,end,params):
+def profileTriNucMismatches(seqs,reference_int,params):
     fasta = params["reference"]
     reverse_comp = {"A":"T",'T':"A","C":"G","G":"C"}
     base2num = {"A": 0, "T": 1, "C": 2, "G": 3}
     num2base = "ATCG"
     base_changes = ['C>A','C>G','C>T','T>A','T>C','T>G']
+    chrom = seqs[0].reference_name
+    start = seqs[0].reference_start
 
     F1R2 = []
     F2R1 = []
@@ -623,8 +609,8 @@ def profileTriNucMismatches(seqs,reference_int,chrom,start,end,params):
     rightS = re_cigar.group(3) or 0
 
     n = min([seq.reference_length for seq in seqs])
-    F1R2_antimask = np.full(nn,True)
-    F2R1_antimask = np.full(nn,True)
+    F1R2_antimask = np.full(n,True)
+    F2R1_antimask = np.full(n,True)
     m_F1R2 = len(F1R2)
     m_F2R1 = len(F2R1)
 
@@ -675,9 +661,9 @@ def profileTriNucMismatches(seqs,reference_int,chrom,start,end,params):
         F2R1_count_mat[nn, :] = (F2R1_seq_mat == nn).sum(axis=0)
 
     F1R2_count_mat[reference_int, np.ogrid[:n]] = -1
-    F1R2_alt_int = np.argmax(F1R2_count_mat, axis=0)
+    F1R2_alt_int = np.where(F1R2_count_mat.sum(axis=0) != -1,np.argmax(F1R2_count_mat, axis=0),reference_int)
     F2R1_count_mat[reference_int, np.ogrid[:n]] = -1
-    F2R1_alt_int = np.argmax(F1R2_count_mat, axis=0)
+    F2R1_alt_int = np.where(F2R1_count_mat.sum(axis=0) != -1,np.argmax(F2R1_count_mat, axis=0),reference_int)
     
     #total_qual_mat = F1R2_qual_mat_merged + F2R1_qual_mat_merged
     F1R2_ref_qual = F1R2_qual_mat_merged[reference_int, np.ogrid[:n]] 
@@ -685,7 +671,7 @@ def profileTriNucMismatches(seqs,reference_int,chrom,start,end,params):
     F1R2_antimask[(F1R2_count_mat >= 1).sum(axis=0) > 1] = False
     F1R2_antimask[F1R2_ref_qual<=60] = False
     F1R2_antimask[np.logical_and(F1R2_alt_qual<=60,F1R2_alt_qual!=0)]  = False
-    F1R2_antimask[ref_int == 4] = False
+    F1R2_antimask[reference_int == 4] = False
     #alt_ind = np.where(alt_qual!=0)[0]
     
     F2R1_ref_qual = F2R1_qual_mat_merged[reference_int, np.ogrid[:n]] 
@@ -693,7 +679,7 @@ def profileTriNucMismatches(seqs,reference_int,chrom,start,end,params):
     F2R1_antimask[(F2R1_count_mat >= 1).sum(axis=0) > 1] = False
     F2R1_antimask[F2R1_ref_qual<=60] = False
     F2R1_antimask[np.logical_and(F2R1_alt_qual<=60,F2R1_alt_qual!=0)]  = False
-    F2R1_antimask[ref_int == 4] = False
+    F2R1_antimask[reference_int == 4] = False
 
     mismatch_dict = dict()
     for minus_base in ['A','T','C','G']:
@@ -709,7 +695,7 @@ def profileTriNucMismatches(seqs,reference_int,chrom,start,end,params):
             if ref_base == 'C' or ref_base == 'T':
                 mismatch_dict[minus_base + ref_base + plus_base][F1R2_alt_int[nn]] += 1
             else:
-                mismatch[reverse_comp[plus_base] + reverse_comp[ref_base] + reverse_comp[minus_base]][base2num[reverse_comp[alt_base]]] += 1
+                mismatch_dict[reverse_comp[plus_base] + reverse_comp[ref_base] + reverse_comp[minus_base]][base2num[reverse_comp[alt_base]]] += 1
         if F2R1_antimask[nn]:
             ref_base = num2base[reference_int[nn]]
             alt_base = num2base[F2R1_alt_int[nn]]
@@ -718,9 +704,8 @@ def profileTriNucMismatches(seqs,reference_int,chrom,start,end,params):
             if ref_base == 'C' or ref_base == 'T':
                 mismatch_dict[minus_base + ref_base + plus_base][F2R1_alt_int[nn]] += 1
             else:
-                mismatch[reverse_comp[plus_base] + reverse_comp[ref_base] + reverse_comp[minus_base]][base2num[reverse_comp[alt_base]]] += 1
-    print(mismatch)
-    return mismatch
+                mismatch_dict[reverse_comp[plus_base] + reverse_comp[ref_base] + reverse_comp[minus_base]][base2num[reverse_comp[alt_base]]] += 1
+    return mismatch_dict
     
 
     

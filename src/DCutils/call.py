@@ -38,6 +38,7 @@ def callBam(params, processNo, chunkSize):
     minMapq = params["mapq"]
     mutRate = params["mutRate"]
     pcut = params["pcutoff"]
+    isLearn = params.get("isLearn",False)
     nn = processNo
     output = "tmp/" + params["output"] + "_" + str(nn)
     noise = BED(params["noise"])
@@ -46,6 +47,13 @@ def callBam(params, processNo, chunkSize):
     muts = []
     muts_dict = dict()
     duplex_read_num_dict = dict()
+    FPs = []
+    RPs = []
+    mismatch_dict = dict()
+    for minus_base in ['A','T','C','G']:
+        for ref_base in ['C','T']:
+                for plus_base in ['A','T','C','G']:
+                    mismatch_dict[minus_base+ref_base + plus_base] = [0,0,0,0]
 
     print("Process" + str(processNo) + ": Initiated")
     ### Initialize
@@ -154,6 +162,9 @@ def callBam(params, processNo, chunkSize):
                         # genotypeDSIndel(readSet,tumorBam,params)
 
                     else:
+                        if isLearn:
+                            if sum([int(seq.get_tag('NM')) for seq in readSet]) == 0:
+                                continue
                         rs_reference_end = max([r.reference_end for r in readSet])
                         chromNow = readSet[0].reference_name
                         if (
@@ -258,6 +269,15 @@ def callBam(params, processNo, chunkSize):
                             antimask,
                             params,
                         )
+                        if isLearn:
+                            mismatch_now = profileTriNucMismatches(
+                                readSet,
+                                ref_np[start_ind:end_ind],
+                                params,
+                            )
+                            for trinuc in mismatch_dict.keys():
+                                for nnn in range(4):
+                                    mismatch_dict[trinuc][nnn] += mismatch_now[trinuc][nnn]
                         ref_int = ref_np[start_ind:end_ind]
                         refs_ind = np.nonzero(
                             np.logical_and(
@@ -316,8 +336,9 @@ def callBam(params, processNo, chunkSize):
                                     muts_ind[nn] + 1,
                                     abs(readSet[0].template_length) - muts_ind[nn],
                                 )
-                                readPos3p = (
-                                    abs(readSet[0].reference_length) - muts_ind[nn]
+                                readPos3p = min(
+                                    abs(readSet[0].reference_length) - muts_ind[nn],
+                                    muts_ind[nn] + 1
                                 )
                             else:
                                 readPos5p = min(
@@ -326,7 +347,13 @@ def callBam(params, processNo, chunkSize):
                                     - readSet[0].reference_length
                                     + muts_ind[nn],
                                 )
-                                readPos3p = readSet[0].reference_length - muts_ind[nn]
+                                readPos3p = min(
+                                    abs(readSet[0].reference_length) - muts_ind[nn],
+                                    muts_ind[nn] + 1
+                                )
+                            FPs.append(readPos5p)
+                            RPs.append(readPos3p)
+
                             mut = {
                                 "chrom": mut_chrom,
                                 "pos": mut_pos,
@@ -363,6 +390,8 @@ def callBam(params, processNo, chunkSize):
                                 "_".join([mut_chrom, str(mut_pos), mut_ref, mut_alt])
                             ] = 0
                             muts.append(mut)
+                        if isLearn:
+                            continue
                         coverage[start_ind:end_ind][pass_bool] += 1
                         duplex_read_num_dict[duplex_no][1] += np.count_nonzero(pass_bool)
                         duplex_read_num_dict[duplex_no][0] += 1
@@ -400,6 +429,9 @@ def callBam(params, processNo, chunkSize):
                 # genotypeDSIndel(readSet,tumorBam,params)
 
             else:
+                if isLearn:
+                    if sum([int(seq.get_tag('NM')) for seq in readSet]) == 0:
+                        continue
                 rs_reference_end = max([r.reference_end for r in readSet])
                 chromNow = readSet[0].reference_name
                 if (
@@ -504,6 +536,15 @@ def callBam(params, processNo, chunkSize):
                     antimask,
                     params,
                 )
+                if isLearn:
+                    mismatch_now = profileTriNucMismatches(
+                        readSet,
+                        ref_np[start_ind:end_ind],
+                        params,
+                    )
+                    for trinuc in mismatch_dict.keys():
+                        for nnn in range(4):
+                            mismatch_dict[trinuc][nnn] += mismatch_now[trinuc][nnn]
                 ref_int = ref_np[start_ind:end_ind]
                 refs_ind = np.nonzero(
                     np.logical_and(
@@ -520,10 +561,6 @@ def callBam(params, processNo, chunkSize):
                 pass_bool = np.full(F1R2_ARLR.size, False, dtype=bool)
                 pass_bool[refs_ind] = True
                 pass_bool[muts_ind] = True
-                # pass_bool = np.logical_and(antimask,llt_pass)
-                coverage[start_ind:end_ind][pass_bool] += 1
-                # mut_bool = (DS_consensus != ref_np[start_ind:end_ind])
-                # muts_ind = np.nonzero(np.logical_and(mut_bool,pass_bool))[0].tolist()
                 pos = [
                     mut_ind + start_ind + reference_mat_start
                     for mut_ind in muts_ind
@@ -566,8 +603,9 @@ def callBam(params, processNo, chunkSize):
                             muts_ind[nn] + 1,
                             abs(readSet[0].template_length) - muts_ind[nn],
                         )
-                        readPos3p = (
-                            abs(readSet[0].reference_length) - muts_ind[nn]
+                        readPos3p = min(
+                            abs(readSet[0].reference_length) - muts_ind[nn],
+                            muts_ind[nn] + 1
                         )
                     else:
                         readPos5p = min(
@@ -576,7 +614,13 @@ def callBam(params, processNo, chunkSize):
                             - readSet[0].reference_length
                             + muts_ind[nn],
                         )
-                        readPos3p = readSet[0].reference_length - muts_ind[nn]
+                        readPos3p = min(
+                            abs(readSet[0].reference_length) - muts_ind[nn],
+                            muts_ind[nn] + 1
+                        )
+                    FPs.append(readPos5p)
+                    RPs.append(readPos3p)
+
                     mut = {
                         "chrom": mut_chrom,
                         "pos": mut_pos,
@@ -613,13 +657,16 @@ def callBam(params, processNo, chunkSize):
                         "_".join([mut_chrom, str(mut_pos), mut_ref, mut_alt])
                     ] = 0
                     muts.append(mut)
+                if isLearn:
+                    continue
                 coverage[start_ind:end_ind][pass_bool] += 1
                 duplex_read_num_dict[duplex_no][1] += np.count_nonzero(pass_bool)
                 duplex_read_num_dict[duplex_no][0] += 1
                 duplex_count += 1
-        if "coverage" in locals():
-            total_coverage += np.sum(coverage)
     """
     Calling block ends
     """
+    if isLearn:
+        print(FPs,RPs,muts)
+        return mismatch_dict,FPs,RPs
     return muts, total_coverage, recCount, duplex_count, duplex_read_num_dict

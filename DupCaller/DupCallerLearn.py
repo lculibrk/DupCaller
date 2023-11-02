@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from DCutils.splitBamRegions import splitBamRegions
-from DCutils.callBamRegionFilter import callBam
-from DCutils.utils import createVcfStrings
+from DCutils.call import callBam
+from DCutils.funcs import createVcfStrings
 
 import argparse
 from collections import OrderedDict
@@ -12,6 +12,7 @@ from multiprocessing import Pool
 from pysam import AlignmentFile as BAM
 import pysam
 import time
+from matplotlib import pyplot as plt
 
 
 if __name__ == "__main__":
@@ -35,15 +36,62 @@ if __name__ == "__main__":
         "-p", "--threads", type=int, help="prefix of the output files", default=1
     )
     parser.add_argument(
+        "-ae",
+        "--amperr",
+        type=float,
+        help="estimated polymerase error rate",
+        default=1e-5,
+    )
+    parser.add_argument(
+        "-mr",
+        "--mutRate",
+        type=float,
+        help="estimated somatic mutation rate per base",
+        default=2.5e-7,
+    )
+    parser.add_argument(
+        "-t",
+        "--threshold",
+        type=float,
+        help="log likelihood ratio threshold of making a mutation call",
+        default=2,
+    )
+    parser.add_argument(
         "-mq",
         "--mapq",
         type=float,
         help="minumum mapq for an alignment to be considered",
         default=30,
     )
+    # parser.add_argument('-da','--damage',type=float,default=5E-7)
 
+    parser.add_argument("-n", "--normalBam", type=str, help="deduplicated normal bam")
     parser.add_argument("-m", "--noise", type=str, help="noise mask")
-
+    parser.add_argument("-c", "--ncoverage", type=str, help="coverage bed of ")
+    parser.add_argument(
+        "-tt",
+        "--trimF",
+        type=int,
+        help="ignore mutation if it is less than n bps from ends of template",
+        default=0,
+    )
+    parser.add_argument(
+        "-tr",
+        "--trimR",
+        type=int,
+        help="ignore mutation if it is less than n bps from ends of read",
+        default=0,
+    )
+    parser.add_argument(
+        "-d",
+        "--minNdepth",
+        type=int,
+        help="minumum coverage in normal for called variants",
+        default=10,
+    )
+    parser.add_argument("-nad", "--maxAltCount", type=int, default=0)
+    parser.add_argument("-maf", "--maxAF", type=int, default=0.1)
+    parser.add_argument("-rl", "--readLen", type=int, default=134)
     args = parser.parse_args()
 
     """
@@ -57,8 +105,17 @@ if __name__ == "__main__":
         "output": args.output,
         "regions": args.regions,
         "threads": args.threads,
+        "amperr": args.amperr,
+        "mutRate": args.mutRate,
+        "pcutoff": args.threshold,
         "mapq": args.mapq,
         "noise": args.noise,
+        "trim5": args.trimF,
+        "trim3": args.trimR,  # "trim5DBS": args.trim5DBS,\
+        # "trim3DBS": args.trim3DBS,\
+        "minNdepth": args.minNdepth,
+        "maxAltCount": args.maxAltCount,
+        "ncoverage": args.ncoverage,  # "damage": args.damage
     }
     """
     Initialze run
@@ -81,18 +138,13 @@ if __name__ == "__main__":
         # contigs = [(r.strip('\n'),) for r in open(args.regions,'r').readlines()] # Only process contigs in region file
         paramsNow = params
         paramsNow["reference"] = fasta
+        paramsNow["isLearn"] = True
         regions = params["regions"]
         paramsNow["regions"] = [
             (chrom, 0, bamObject.get_reference_length(chrom) - 1) for chrom in regions
         ]
-        mutsAll, coverage, rec_num, duplex_num, duplex_read_num_single = callBam(
+        mismatch,FPs,RPs = callBam(
             paramsNow, 0, 1000000
-        )
-        muts_num = len(mutsAll)
-        duplex_combinations = list(duplex_read_num_single.keys())
-        duplex_combinations.sort()
-        duplex_read_num = OrderedDict(
-            {duplex_read_num_single[num] for num in duplex_combinations}
         )
     else:
         """
@@ -159,102 +211,47 @@ if __name__ == "__main__":
             paramsNow = params
             paramsNow["reference"] = fastaNow
             paramsNow["regions"] = regions
+            paramsNow["isLearn"] = True
             callArgument = (paramsNow.copy(), nn, chunkSize)
             callArguments.append(callArgument)
             regions = []
         results = pool.starmap(
             callBam, callArguments
         )  # each result return three list: number of duplex reads, effective lengths, list of mutations
-        muts = [_[0] for _ in results]
-        coverages = [_[1] for _ in results]
-        rec_nums = [_[2] for _ in results]
-        duplex_nums = [_[3] for _ in results]
-        duplex_read_nums = [_[4] for _ in results]
         print(
             "..............Completed bam calling in "
             + str((time.time() - startTime2) / 60)
             + " minutes,merging results................."
         )
+        print(results)
         pool.close()
         pool.terminate()
         pool.join()
-        mutsAll = sum(muts, [])
-        muts_positions = [
-            mut["chrom"] + str(mut["pos"]) + mut["ref"] + mut["alt"] for mut in mutsAll
-        ]
-        muts_dict = dict()
-        take_ind = list()
-        for nnn, mut in enumerate(muts_positions):
-            if muts_dict.get(mut) is None:
-                take_ind.append(nnn)
-                muts_dict[mut] = 1
-        mutsAll_new = [mutsAll[ind] for ind in take_ind]
-        mutsAll = mutsAll_new
-        muts_num = len(mutsAll)
-        coverage = sum(coverages)
-        rec_num = sum(rec_nums)
-        duplex_num = sum(duplex_nums)
-
-        duplex_combinations = list(
-            set.union(*[set(d.keys()) for d in duplex_read_nums])
-        )
-        duplex_combinations.sort()
-        duplex_read_num = OrderedDict(
-            {
-                num: sum([d.get(num, 0) for d in duplex_read_nums])
-                for num in duplex_combinations
-            }
-        )
-
-    tBam = BAM(args.bam, "rb")
-    contigs = tBam.references
-    # print(contigs)
-    chromDict = {contig: tBam.get_reference_length(contig) for contig in contigs}
-
-    """
-    infoDict = {"SS":[1,"Float","Somatic Score of variant"],"NM":[1,"Float","mean NM of alt read group"],"AS":[1,"Float","mean AS of the read group"],"XS":[1,"Float","mean XS of the read group"],\
-    "RP5":[1,"Integer","read position"],"RP3":[1,"Integer","distance from 3p"]}
-    formatDict = {"AC":[1,"Integer","Count of alt allele"],"RC":[1,"Integer","Count of ref allele"],"DP":[1,"Integer","Depth at the location"],\
-    "DC":[1,"Integer","Number of reads in the duplex group"]}
-    filterDict = {"PASS":"All filter Passed"}
-    """
-    infoDict = {
-        "F1R2": [1, "Integer", "Number of F1R2 read(s) in the read bundle"],
-        "F2R1": [1, "Integer", "Number of F2R1 read(s) in the read bundle"],
-        "RP5": [1, "Integer", "read position"],
-        "RP3": [1, "Integer", "distance from 3p"],
-        "TG": [1, "Float", "Alt/Ref log likelihood ratio of top strand"],
-        "BG": [1, "Float", "Alt/Ref log likelihood ratio of bottom strand"],
-        "TC": [4, "Integer", "Top strand base count"],
-        "BC": [4, "Float", "Bottom strand base count"],
-        "BC": [4, "Integer", "Top strand base count"],
-        "BC": [4, "Float", "Bottom strand base count"],
-    }
-    formatDict = {
-        "AC": [1, "Integer", "Count of alt allele"],
-        "RC": [1, "Integer", "Count of ref allele"],
-        "DP": [1, "Integer", "Depth at the location"],
-    }
-    filterDict = {"PASS": "All filter Passed"}
-    vcfLines = createVcfStrings(chromDict, infoDict, formatDict, filterDict, mutsAll)
-    with open(args.output + ".vcf", "w") as vcf:
-        vcf.write(vcfLines)
-
-    burden = muts_num / coverage
-    efficiency = duplex_num / rec_num
-
-    with open(params["output"] + "_summary.txt", "w") as f:
-        f.write(f"Number of Mutations\t{muts_num}\n")
-        f.write(f"Effective Coverage\t{coverage}\n")
-        f.write(f"Estimated Burden\t{burden}\n")
-        f.write(f"Duplex read number\t{duplex_num}\n")
-        f.write(f"Efficiency\t{efficiency}\n")
-
-    with open(params["output"] + "_duplex_group_stats.txt", "w") as f:
-        f.write(f"Duplex Group Strand Composition\tDuplex Group Number\n")
-        for read_num in duplex_read_num.keys():
-            f.write(f"{read_num}\t{duplex_read_num[read_num]}\n")
-
+        mismatch_dicts = [_[0] for _ in results]
+        FPs = sum([_[1] for _ in results],[])
+        RPs = sum([_[2] for _ in results],[])
+        mismatch_dict = dict()
+        #print(mismatch_dicts)
+        for minus_base in ['A','T','C','G']:
+            for ref_base in ['C','T']:
+                    for plus_base in ['A','T','C','G']:
+                        mismatch_dict[minus_base+ref_base + plus_base] = [0,0,0,0]
+        for trinuc in mismatch_dicts[0].keys():
+            for nnn in range(4):
+                mismatch_dict[trinuc][nnn] = sum(_[trinuc][nnn] for _ in mismatch_dicts)
+    with open(params["output"] + "/"+args.output+"_mismatch_trinuc_profile.txt", "w") as f:
+        f.write("\tA\tT\tC\tG\n")
+        for trinuc in mismatch_dict.keys():
+            f.write(f"{trinuc}\t{mismatch_dict[trinuc][0]}\t{mismatch_dict[trinuc][1]}\t{mismatch_dict[trinuc][2]}\t{mismatch_dict[trinuc][3]}\n")
+    FPs_count = [0 for _ in range(args.readLen)]
+    RPs_count = [0 for _ in range(args.readLen)] 
+    for nn in range(args.readLen):
+        FPs_count[nn] = FPs.count(nn+1)
+        RPs_count[nn] = RPs.count(nn+1)
+    with open(params["output"] + "/"+args.output+"_DBS_end_profile.txt", "w") as f:
+        f.write("Distance\tMutations_fragment_end\tMutations_read_end\n")
+        for nn in range(args.readLen):
+            f.write(f"{nn+1}\t{FPs_count[nn]}\t{RPs_count[nn]}\n")   
     print(
         "..............Completed variant calling "
         + str((time.time() - startTime) / 60)
