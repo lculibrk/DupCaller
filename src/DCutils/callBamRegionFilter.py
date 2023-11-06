@@ -60,7 +60,7 @@ def callBam(params, processNo, chunkSize):
     # chromPast = 'startChrom'
     fasta = reference
     recCount = 0
-    currentCheckPoint = 100000
+    currentCheckPoint = 1000000
     duplex_count = 0
     reference_mat_chrom = "anyChrom"
     reference_mat_start = 0
@@ -79,7 +79,7 @@ def callBam(params, processNo, chunkSize):
                 + str((time.time() - starttime) / 60)
                 + " minutes"
             )
-            currentCheckPoint += 100000
+            currentCheckPoint += 1000000
         if (
             rec.mapping_quality <= minMapq
             or rec.is_supplementary

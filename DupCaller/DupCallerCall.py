@@ -308,7 +308,6 @@ if __name__ == "__main__":
     burden_naive = muts_num / coverage
     efficiency = duplex_num / rec_num
 
-
     with open(params["output"] + "/"+args.output+"_duplex_group_stats.txt", "w") as f:
         f.write(f"duplex_group_strand_composition\tduplex_group_number\teffective_coverage\tmutation_count\n")
         muts_by_duplex_group = OrderedDict()
@@ -350,6 +349,14 @@ if __name__ == "__main__":
     plt.legend(handles=[lgd1,lgd2])
     plt.savefig(params["output"] + "/"+args.output+"_burden_by_duplex_group_size.png")
 
+    uniq_reads = 0
+    pass_reads = 0
+    for read_num in duplex_read_num.keys():
+        reads_per_group = int(read_num.split('+')[0])+int(read_num.split('+')[1])
+        uniq_reads += duplex_read_num[read_num]
+        pass_reads += duplex_read_num[read_num] * reads_per_group
+    dup_rate = uniq_reads/pass_reads
+
     with open(params["output"] + "/"+args.output+"_summary.txt", "w") as f:
         f.write(f"Number of Mutations\t{muts_num}\n")
         f.write(f"Effective Coverage\t{coverage}\n")
@@ -357,7 +364,11 @@ if __name__ == "__main__":
         f.write(f"Estimated Least-square Burden\t{burden_lstsq}\n")
         f.write(f"Least-square Burden Upper 95% CI\t{burden_lstsq_uci}\n")
         f.write(f"Least-square Burden Lower 95% CI\t{burden_lstsq_lci}\n")
-        f.write(f"Duplex Group Number\t{duplex_num}\n")
+        f.write(f"Total Read Number\t{rec_num}\n")
+        f.write(f"Pass-filter Read Numer\t{pass_reads}\n")
+        f.write(f"Duplex Group Number\t{uniq_reads}\n")
+        f.write(f"Effective Duplex Group Number\t{duplex_num}\n")
+        f.write(f"Pass-filter Duplication Rate\t{dup_rate}\n")
         f.write(f"Efficiency\t{efficiency}\n")
         f.write(f"Per Duplex Group Coverage \t{coverage/duplex_num}\n")       
 
