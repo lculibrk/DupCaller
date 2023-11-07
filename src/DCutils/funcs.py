@@ -537,50 +537,127 @@ def genotypeDSIndel(seqs, bam, params):
     end = seqs[0].reference_end
     f1r2_names_dict = {f1r2.query_name: nn for nn, f1r2 in enumerate(F1R2)}
     f2r1_names_dict = {f2r1.query_name: nn for nn, f2r1 in enumerate(F2R1)}
-    f1r2_genotype = np.zeros([len(F1R2), 1])
-    f2r1_genotype = np.zeros([len(F2R1), 1])
+    f1r2_indels = dict()
+    f2r1_indels = dict()
+    indels = []
+    #f1r2_genotype = np.zeros([len(F1R2), 1])
+    #f2r1_genotype = np.zeros([len(F2R1), 1])
+    """
     for nn, col in enumerate(bam.pileup(chrom, start, end, flag_filter=2816)):
-        indel_flag = 0
+        #indel_flag = 0
         for read in col.pileups:
             if read.alignment.query_name in f1r2_names_dict:
                 if read.indel != 0:
-                    indel_flag = 1
-                    f1r2_genotype[
-                        f1r2_names_dict[read.alignment.query_name], 0
-                    ] = read.indel
-                print(read.indel, read.alignment.query_name, f1r2_names_dict)
-        if indel_flag == 1:
-            break
+                    #indel_flag = 1
+                    #f1r2_genotype[
+                        #f1r2_names_dict[read.alignment.query_name], 0
+                    #] = read.indel
+                    indel = str(col.reference_pos)+":"+str(read.indel)
+                    if read.indel < 0:
+                        read_pos = read.query_position
+                        if read_pos <= 3: read_pos = 3
+                        if read_pos >= len(read.alignment.query_alignment_qualities)-4: read_pos = len(read.alignment.query_alignment_qualities)-4
+                        mean_qual = sum(read.alignment.query_alignment_qualities[read_pos-3:read_pos+4])/8
+                    else:
+                        read_pos = read.query_position
+                        mean_qual = sum(read.alignment.query_alignment_qualities[read_pos:read_pos+indel])/read.indel
+                    if f1r2_indels.get(indel) is not None:
+                        f1r2_indels[indel] += mean_qual
+                    else:
+                        f1r2_indels[indel] = mean_qual
+                    if f2r1_indels.get(indel) is None:
+                        f2r1_indels[indel] = 0
+    """
     for nn, col in enumerate(bam.pileup(chrom, start, end, flag_filter=2816)):
-        indel_flag = 0
+        #indel_flag = 0
+        if col.reference_pos < start or col.reference_pos > end: continue
         for read in col.pileups:
-            if read.alignment.query_name in f1r2_names_dict:
+            if read.alignment.query_name in f1r2_names_dict or read.alignment.query_name in f2r1_names_dict:
                 if read.indel != 0:
-                    indel_flag = 1
-                    f1r2_genotype[
-                        f1r2_names_dict[read.alignment.query_name], 0
-                    ] = read.indel
-                print(read.indel, read.alignment.query_name, f1r2_names_dict)
-        if indel_flag == 1:
-            break
-
-    log_gt_mat = np.ones([n, 4]) * np.log(0.25)
-    F1R2_gt = genotypeSSSnv(
-        F1R2_seq_mat[:, antimask],
-        F1R2_qual_mat[:, antimask],
-        prior_mat[antimask, :],
-        params,
+                    indel = str(col.reference_pos)+":"+str(read.indel)
+                    indels.append(indel)
+    m = len(indels)   
+    f1r2_alt_seq_prob = np.zeros(m)
+    f1r2_ref_seq_prob = np.zeros(m)      
+    f2r1_alt_seq_prob = np.zeros(m)
+    f2r1_ref_seq_prob = np.zeros(m)             
+    for nn,indel in enumerate(indels):
+        indel_pos = int(indel.split(":")[0])
+        indel_size= int(indel.split(":")[1])
+        for col in bam.pileup(chrom, indel_pos-1, indel_pos, flag_filter=2816): 
+            if col.reference_pos != indel_pos: continue
+            for read in col.pileups:
+                if read.alignment.query_name in f1r2_names_dict:
+                    #print(read.query_position,col.reference_pos,read.indel,indel_size)
+                    if read.indel == indel_size:
+                        if indel_size < 0:
+                            read_pos = read.query_position
+                            if read_pos <= 3: read_pos = 3
+                            if read_pos >= len(read.alignment.query_alignment_qualities)-4: read_pos = len(read.alignment.query_alignment_qualities)-4
+                            mean_qual = sum(read.alignment.query_alignment_qualities[read_pos-3:read_pos+4])/8
+                        else:
+                            read_pos = read.query_position
+                            mean_qual = sum(read.alignment.query_alignment_qualities[read_pos:read_pos+indel_size])/abs(indel_size)
+                        f1r2_alt_seq_prob[nn] += mean_qual
+                    else:
+                        if indel_size > 0:
+                            read_pos = read.query_position
+                            if read_pos <= 3: read_pos = 3
+                            if read_pos >= len(read.alignment.query_alignment_qualities)-4: read_pos = len(read.alignment.query_alignment_qualities)-4
+                            mean_qual = sum(read.alignment.query_alignment_qualities[read_pos-3:read_pos+4])/8
+                        else:
+                            #print(read.query_position,indel,read.is_del,read)
+                            read_pos = read.query_position
+                            mean_qual = sum(read.alignment.query_alignment_qualities[read_pos:read_pos-indel_size])/abs(indel_size)
+                        f1r2_ref_seq_prob[nn] += mean_qual
+                    
+                elif read.alignment.query_name in f2r1_names_dict:
+                    if read.indel == indel_size:
+                        if indel_size < 0:
+                            read_pos = read.query_position
+                            if read_pos <= 3: read_pos = 3
+                            if read_pos >= len(read.alignment.query_alignment_qualities)-4: read_pos = len(read.alignment.query_alignment_qualities)-4
+                            mean_qual = sum(read.alignment.query_alignment_qualities[read_pos-3:read_pos+4])/8
+                        else:
+                            read_pos = read.query_position
+                            mean_qual = sum(read.alignment.query_alignment_qualities[read_pos:read_pos+read.indel_size])/abs(indel_size)
+                        f2r1_alt_seq_prob[nn] += mean_qual
+                    else:
+                        if indel_size > 0:
+                            read_pos = read.query_position
+                            if read_pos <= 3: read_pos = 3
+                            if read_pos >= len(read.alignment.query_alignment_qualities)-4: read_pos = len(read.alignment.query_alignment_qualities)-4
+                            mean_qual = sum(read.alignment.query_alignment_qualities[read_pos-3:read_pos+4])/8
+                        else:
+                            read_pos = read.query_position
+                            mean_qual = sum(read.alignment.query_alignment_qualities[read_pos:read_pos-indel_size])/abs(indel_size)
+                        f2r1_ref_seq_prob[nn] += mean_qual                      
+        """
+        for read in col.pileups:
+            if read.alignment.query_name in f2r1_names_dict:
+                if read.indel != 0:
+                    indel = str(col.reference_pos)+":"+str(read.indel)
+                    if read.indel < 0:
+                        read_pos = read.query_position()
+                        if read_pos <= 3: read_pos = 3
+                        if read_pos >= len(read.alignment.query_alignment_qualities)-4: read_pos = len(read.alignment.query_alignment_qualities)-4
+                        mean_qual = sum(read.alignment.query_alignment_qualities[read_pos-3:read_pos+4])/8
+                    else:
+                        read_pos = read.query_position
+                        mean_qual = sum(read.alignment.query_alignment_qualities[read_pos:read_pos+indel])/read.indel
+                    if f2r1_indels.get(indel) is not None:
+                        f2r1_indels[indel] += mean_qual
+                    else:
+                        f2r1_indels[indel] = mean_qual
+                        f1r2_indels[indel] = 0
+        """
+    F1R2_ref_prob, F1R2_alt_prob = calculatePosterior(
+        Pamp, F1R2_ref_prob_mat, F1R2_alt_prob_mat, prior_ref, prior_alt
     )
-    F2R1_gt = genotypeSSSnv(
-        F2R1_seq_mat[:, antimask],
-        F2R1_qual_mat[:, antimask],
-        prior_mat[antimask, :],
-        params,
+    F2R1_ref_prob, F2R1_alt_prob = calculatePosterior(
+        Pamp, F2R1_ref_prob_mat, F2R1_alt_prob_mat, prior_ref, prior_alt
     )
-    m, n = F1R2_gt.shape
-    log_gt_mat_masked = np.zeros([m, 4])
-    consensus_gt = np.logical_and(F1R2_gt >= 0.95, F2R1_gt >= 0.95, dtype=int)
-    gt_mat[antimask, :] = consensus_gt
+    #for nn,muts 
     return gt_mat
 
 def profileTriNucMismatches(seqs,reference_int,params):
@@ -692,6 +769,8 @@ def profileTriNucMismatches(seqs,reference_int,params):
             alt_base = num2base[F1R2_alt_int[nn]]
             minus_base = fasta[chrom][start+nn-1]
             plus_base = fasta[chrom][start+nn+1]
+            if (minus_base not in ['A','T','C','G']) or (ref_base not in ['A','T','C','G']) or (plus_base not in ['A','T','C','G']):
+                continue
             if ref_base == 'C' or ref_base == 'T':
                 mismatch_dict[minus_base + ref_base + plus_base][F1R2_alt_int[nn]] += 1
             else:
@@ -701,6 +780,8 @@ def profileTriNucMismatches(seqs,reference_int,params):
             alt_base = num2base[F2R1_alt_int[nn]]
             minus_base = fasta[chrom][start+nn-1]
             plus_base = fasta[chrom][start+nn+1]
+            if (minus_base not in ['A','T','C','G']) or (ref_base not in ['A','T','C','G']) or (plus_base not in ['A','T','C','G']):
+                continue
             if ref_base == 'C' or ref_base == 'T':
                 mismatch_dict[minus_base + ref_base + plus_base][F2R1_alt_int[nn]] += 1
             else:

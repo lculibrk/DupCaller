@@ -158,8 +158,7 @@ def callBam(params, processNo, chunkSize):
                         for seq in readSet
                     ]
                     if any(indel_bool):
-                        mlmlml = 1
-                        # genotypeDSIndel(readSet,tumorBam,params)
+                        genotypeDSIndel(readSet,tumorBam,params)
 
                     else:
                         if isLearn:
