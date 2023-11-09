@@ -33,7 +33,6 @@ def callBam(params, processNo, chunkSize):
     nbam = params["normalBam"]
     regions = params["regions"]
     germline = VCF(params["germline"], "rb")
-    ncoverage = BED(params["ncoverage"])
     reference = params["reference"]
     minMapq = params["mapq"]
     mutRate = params["mutRate"]
@@ -46,6 +45,7 @@ def callBam(params, processNo, chunkSize):
     num2base = "ATCG"
     muts = []
     muts_dict = dict()
+    muts_indels = []
     duplex_read_num_dict = dict()
     FPs = []
     RPs = []
@@ -56,8 +56,11 @@ def callBam(params, processNo, chunkSize):
                     mismatch_dict[minus_base+ref_base + plus_base] = [0,0,0,0]
 
     print("Process" + str(processNo) + ": Initiated")
+    
+    
     ### Initialize
     total_coverage = 0
+    total_coverage_indel = 0
     starttime = time.time()
     tumorBam = BAM(bam, "rb")
     normalBam = BAM(nbam, "rb")
@@ -68,7 +71,8 @@ def callBam(params, processNo, chunkSize):
     # chromPast = 'startChrom'
     fasta = reference
     recCount = 0
-    currentCheckPoint = 100000
+    currentCheckPoint = 1000000
+    lastTime = 0
     duplex_count = 0
     reference_mat_chrom = "anyChrom"
     reference_mat_start = 0
@@ -78,16 +82,22 @@ def callBam(params, processNo, chunkSize):
     for rec, region in bamIterateMultipleRegion(tumorBam, regions):
         recCount += 1
         if recCount == currentCheckPoint:
+            currentTime = (time.time() - starttime) / 60
+            usedTime = currentTime - lastTime
+            lastTime=currentTime
             print(
                 "Process"
                 + str(processNo)
                 + ": processed "
                 + str(recCount)
                 + " reads in "
-                + str((time.time() - starttime) / 60)
-                + " minutes"
+                + f"{currentTime : .2f}"
+                + " minutes. Time for process last 1000000 reads:"
+                + f"{usedTime : .2f}"
+                + " minutes."
             )
-            currentCheckPoint += 100000
+
+            currentCheckPoint += 1000000
         if (
             rec.mapping_quality <= minMapq
             or rec.is_supplementary
@@ -99,9 +109,6 @@ def callBam(params, processNo, chunkSize):
             continue
         if rec.get_tag("AS") - rec.get_tag("XS") <= 50:
             continue
-        # if rec.cigartuples[0][0] == 4: continue
-        #if rec.cigarstring.count("I") + rec.cigarstring.count("D") >= 2:
-            #continue
         start = rec.reference_start
         bc = rec.query_name.split("_")[1]
         bcsplit = bc.split("+")
@@ -110,9 +117,7 @@ def callBam(params, processNo, chunkSize):
         chrom = tumorBam.get_reference_name(rec.reference_id)
         if currentStart == -1:
             currentStart = start
-        # print(start,currentStart)
         if start == currentStart:
-            # print(currentReadDict,1)
             if currentReadDict.get(bc1 + "+" + bc2) != None:
                 currentReadDict[bc1 + "+" + bc2]["seqs"].append(rec)
                 if (rec.is_forward and rec.is_read1) or (
@@ -153,17 +158,185 @@ def callBam(params, processNo, chunkSize):
                 if duplex_read_num_dict.get(duplex_no) is None:
                     duplex_read_num_dict[duplex_no] = [0,0]
                 if setBc1 != setBc2 and F2R1 > 1 and F1R2 > 1:
+                    rs_reference_end = max([r.reference_end for r in readSet])
+                    chromNow = readSet[0].reference_name
+                    if (
+                        chromNow != reference_mat_chrom
+                        or rs_reference_end >= reference_mat_end
+                    ):
+                        ### Output coverage
+                        if "coverage" in locals():
+                            non_zero_positions = np.nonzero(coverage+coverage_indel)
+                            for pos in non_zero_positions[0].tolist():
+                                locus_bed.write(
+                                    (
+                                        "\t".join(
+                                            [
+                                                reference_mat_chrom,
+                                                str(pos),
+                                                str(pos + 1),
+                                                str(coverage[pos]),
+                                                str(coverage_indel[pos])
+                                            ]
+                                        )
+                                        + "\n"
+                                    ).encode("utf-8")
+                                )
+                            total_coverage += np.sum(coverage)
+                            total_coverage_indel += np.sum(coverage_indel)
+                        reference_mat_chrom = chromNow
+                        reference_mat_start = readSet[0].reference_start
+                        try:
+                            region_end = region[2]
+                        except:
+                            region_end = 10e10
+                        contig_end = tumorBam.get_reference_length(chromNow)
+                        reference_mat_end = min(
+                            readSet[0].reference_start + 100000,
+                            max(region_end, max([seq.reference_end for seq in readSet])),
+                            contig_end,
+                        )
+                        (
+                            prior_mat,
+                            snp_mask,
+                            indel_mask,
+                            noise_mask,
+                            n_cov_mask,
+                            ref_np,
+                        ) = prepare_reference_mats(
+                            reference_mat_chrom,
+                            reference_mat_start,
+                            reference_mat_end,
+                            fasta[reference_mat_chrom][
+                                reference_mat_start:reference_mat_end
+                            ],
+                            germline,
+                            noise,
+                            normalBam,
+                            params,
+                            )
+                        coverage = np.zeros(100000, dtype=int)
+                        coverage_indel = np.zeros(100000, dtype=int)
+                    ### Record read names to check if mate has been processed
+                    processed_flag = 0
+                    for seq in readSet:
+                        if seq.query_name in processed_read_names:
+                            processed_read_names.remove(seq.query_name)
+                            processed_flag = 1
+                            break
+                    if processed_flag == 0:
+                        processed_read_names.add(readSet[0].query_name)
+
+                    start_ind = readSet[0].reference_start - reference_mat_start
+                    reference_length_min = min(
+                        [read.reference_length for read in readSet]
+                    )
+                    end_ind = (
+                        readSet[0].reference_start
+                        + reference_length_min
+                        - reference_mat_start
+                    )
+                    
+                    reference_length_max = max(
+                        [read.reference_length for read in readSet]
+                    )
+                    end_ind_max = (
+                        readSet[0].reference_start
+                        + reference_length_max
+                        - reference_mat_start
+                    )
+                    masks = np.zeros([4, end_ind - start_ind], dtype=bool)
+                    masks[0, :] = snp_mask[start_ind:end_ind]
+                    masks[1, :] = noise_mask[start_ind:end_ind]
+                    masks[2, :] = n_cov_mask[start_ind:end_ind]
+                    left, right = determineTrimLength(
+                        readSet[0], params=params, processed_flag=processed_flag
+                    )
+                    masks[3, :left] = True
+                    masks[3, -right:] = True
+                    antimask = np.all(~masks, axis=0)
+                    ### If the whole reads are masked:
+                    if not np.any(antimask):
+                        continue
                     indel_bool = [
                         ("I" in seq.cigarstring or "D" in seq.cigarstring)
                         for seq in readSet
                     ]
                     if any(indel_bool):
-                        genotypeDSIndel(readSet,tumorBam,params)
-
+                        masks_indel = np.zeros([4, end_ind_max - start_ind], dtype=bool)
+                        masks_indel[0, :] = snp_mask[start_ind:end_ind_max]
+                        masks_indel[1, :] = noise_mask[start_ind:end_ind_max]
+                        masks_indel[2, :] = n_cov_mask[start_ind:end_ind_max]
+                        left, right = determineTrimLength(
+                            readSet[0], params=params, processed_flag=processed_flag
+                        )
+                        masks_indel[3, :left] = True
+                        masks_indel[3, -right:] = True
+                        antimask_indel = np.all(~masks_indel, axis=0)
+                        (
+                            F1R2_ARLR,
+                            F2R1_ARLR,
+                            indels,
+                            F1R2_ref_count,
+                            F1R2_alt_count,
+                            F2R1_ref_count,
+                            F2R1_alt_count
+                        ) = genotypeDSIndel(readSet,tumorBam,antimask_indel,params)
+                        DCS = np.logical_and(F1R2_ARLR>=params["pcutoff"],F2R1_ARLR>=params["pcutoff"])
+                        pass_inds = np.nonzero(DCS)[0].tolist()
+                        indels_pass = [indels[_] for _ in pass_inds]
+                        coverage_indel[start_ind:end_ind_max][antimask_indel] += 1
+                        if len(indels_pass) == 1:
+                            indel = indels_pass[0]
+                            indel_chrom = chromNow
+                            indel_pos = int(indel.split(":")[0])
+                            indel_size = int(indel.split(":")[1])
+                            if indel_size < 0:
+                                indel_ref = str(fasta[indel_chrom][indel_pos:indel_pos-indel_size+1].seq).upper()
+                                indel_alt = fasta[indel_chrom][indel_pos].upper()
+                            else:
+                                indel_ref = fasta[indel_chrom][indel_pos].upper()
+                                indel_alt = indel_ref + indel.split(":")[2]
+                            na, nr, ndp = extractDepthIndel(
+                                normalBam, indel_chrom, indel_pos+1, indel_ref, indel_alt,params
+                            )
+                            if na > params["maxAltCount"]:
+                                continue
+                            ta, tr, tdp = extractDepthIndel(
+                                tumorBam, indel_chrom, indel_pos+1, indel_ref, indel_alt,params
+                            )
+                            indel_rec = {
+                            "chrom": chromNow,
+                            "pos": indel_pos + 1,
+                            "ref": indel_ref,
+                            "alt": indel_alt,
+                            "infos": {
+                                "F1R2": F1R2_alt_count[pass_inds[0]]+F1R2_alt_count[pass_inds[0]],
+                                "F2R1": F2R1_alt_count[pass_inds[0]]+F2R1_alt_count[pass_inds[0]],
+                                "TG": F1R2_ARLR[pass_inds[0]],
+                                "BG": F2R1_ARLR[pass_inds[0]],
+                                "TC": ",".join(
+                                    [
+                                        str(F1R2_alt_count[pass_inds[0]]),
+                                        str(F1R2_ref_count[pass_inds[0]]),
+                                    ]
+                                ),
+                                "BC": ",".join(
+                                    [
+                                        str(F2R1_alt_count[pass_inds[0]]),
+                                        str(F2R1_ref_count[pass_inds[0]]),
+                                    ]
+                                ),
+                            },
+                            "formats": ["AC", "RC", "DP"],
+                            "samples": [[ta, tr, tdp], [na, nr, ndp]],
+                            }
+                            muts_indels.append(indel_rec)
                     else:
                         if isLearn:
                             if sum([int(seq.get_tag('NM')) for seq in readSet]) == 0:
                                 continue
+                        """
                         rs_reference_end = max([r.reference_end for r in readSet])
                         chromNow = readSet[0].reference_name
                         if (
@@ -220,6 +393,7 @@ def callBam(params, processNo, chunkSize):
                                 params,
                                 )
                             coverage = np.zeros(100000, dtype=int)
+                        
                         ### Record read names to check if mate has been processed
                         processed_flag = 0
                         for seq in readSet:
@@ -252,6 +426,7 @@ def callBam(params, processNo, chunkSize):
                         ### If the whole reads are masked:
                         if not np.any(antimask):
                             continue
+                        """
                         ### Calculate genotype probability
                         (
                             F1R2_ARLR,
@@ -272,6 +447,7 @@ def callBam(params, processNo, chunkSize):
                             mismatch_now = profileTriNucMismatches(
                                 readSet,
                                 ref_np[start_ind:end_ind],
+                                antimask,
                                 params,
                             )
                             for trinuc in mismatch_dict.keys():
@@ -323,12 +499,12 @@ def callBam(params, processNo, chunkSize):
                             ):
                                 continue
                             na, nr, ndp = extractDepthSnv(
-                                normalBam, mut_chrom, mut_pos, mut_ref, mut_alt
+                                normalBam, mut_chrom, mut_pos, mut_ref, mut_alt,params
                             )
                             if na > params["maxAltCount"]:
                                 continue
                             ta, tr, tdp = extractDepthSnv(
-                                tumorBam, mut_chrom, mut_pos, mut_ref, mut_alt
+                                tumorBam, mut_chrom, mut_pos, mut_ref, mut_alt,params
                             )
                             if readSet[0].is_forward:
                                 readPos5p = min(
@@ -352,15 +528,12 @@ def callBam(params, processNo, chunkSize):
                                 )
                             FPs.append(readPos5p)
                             RPs.append(readPos3p)
-
                             mut = {
                                 "chrom": mut_chrom,
                                 "pos": mut_pos,
                                 "ref": mut_ref,
                                 "alt": mut_alt,
                                 "infos": {
-                                    "RP5": readPos5p,
-                                    "RP3": readPos3p,
                                     "F1R2": F1R2,
                                     "F2R1": F2R1,
                                     "TG": F1R2_ARLR[muts_ind[nn]],
@@ -419,18 +592,186 @@ def callBam(params, processNo, chunkSize):
         if duplex_read_num_dict.get(duplex_no) is None:
             duplex_read_num_dict[duplex_no] = [0,0]
         if setBc1 != setBc2 and F2R1 > 1 and F1R2 > 1:
+            rs_reference_end = max([r.reference_end for r in readSet])
+            chromNow = readSet[0].reference_name
+            if (
+                chromNow != reference_mat_chrom
+                or rs_reference_end >= reference_mat_end
+            ):
+                ### Output coverage
+                if "coverage" in locals():
+                    non_zero_positions = np.nonzero(coverage+coverage_indel)
+                    for pos in non_zero_positions[0].tolist():
+                        locus_bed.write(
+                            (
+                                "\t".join(
+                                    [
+                                        reference_mat_chrom,
+                                        str(pos),
+                                        str(pos + 1),
+                                        str(coverage[pos]),
+                                        str(coverage_indel[pos])
+                                    ]
+                                )
+                                + "\n"
+                            ).encode("utf-8")
+                        )
+                    total_coverage += np.sum(coverage)
+                    total_coverage_indel += np.sum(coverage_indel)
+                reference_mat_chrom = chromNow
+                reference_mat_start = readSet[0].reference_start
+                try:
+                    region_end = region[2]
+                except:
+                    region_end = 10e10
+                contig_end = tumorBam.get_reference_length(chromNow)
+                reference_mat_end = min(
+                    readSet[0].reference_start + 100000,
+                    max(region_end, readSet[0].reference_end),
+                    contig_end,
+                )
+                (
+                    prior_mat,
+                    snp_mask,
+                    indel_mask,
+                    noise_mask,
+                    n_cov_mask,
+                    ref_np,
+                ) = prepare_reference_mats(
+                    reference_mat_chrom,
+                    reference_mat_start,
+                    reference_mat_end,
+                    fasta[reference_mat_chrom][
+                        reference_mat_start:reference_mat_end
+                    ],
+                    germline,
+                    noise,
+                    normalBam,
+                    params,
+                    )
+                coverage = np.zeros(100000, dtype=int)
+                coverage_indel = np.zeros(100000, dtype=int)
+            ### Record read names to check if mate has been processed
+            processed_flag = 0
+            for seq in readSet:
+                if seq.query_name in processed_read_names:
+                    processed_read_names.remove(seq.query_name)
+                    processed_flag = 1
+                    break
+            if processed_flag == 0:
+                processed_read_names.add(readSet[0].query_name)
+
+            start_ind = readSet[0].reference_start - reference_mat_start
+            reference_length_min = min(
+                [read.reference_length for read in readSet]
+            )
+            end_ind = (
+                readSet[0].reference_start
+                + reference_length_min
+                - reference_mat_start
+            )
+            
+            reference_length_max = max(
+                [read.reference_length for read in readSet]
+            )
+            end_ind_max = (
+                readSet[0].reference_start
+                + reference_length_max
+                - reference_mat_start
+            )
+            masks = np.zeros([4, end_ind - start_ind], dtype=bool)
+            masks[0, :] = snp_mask[start_ind:end_ind]
+            masks[1, :] = noise_mask[start_ind:end_ind]
+            masks[2, :] = n_cov_mask[start_ind:end_ind]
+            left, right = determineTrimLength(
+                readSet[0], params=params, processed_flag=processed_flag
+            )
+            masks[3, :left] = True
+            masks[3, -right:] = True
+            antimask = np.all(~masks, axis=0)
+            ### If the whole reads are masked:
+            if not np.any(antimask):
+                continue
             indel_bool = [
                 ("I" in seq.cigarstring or "D" in seq.cigarstring)
                 for seq in readSet
             ]
             if any(indel_bool):
-                mlmlml = 1
-                # genotypeDSIndel(readSet,tumorBam,params)
-
+                masks_indel = np.zeros([4, end_ind_max - start_ind], dtype=bool)
+                masks_indel[0, :] = snp_mask[start_ind:end_ind_max]
+                masks_indel[1, :] = noise_mask[start_ind:end_ind_max]
+                masks_indel[2, :] = n_cov_mask[start_ind:end_ind_max]
+                left, right = determineTrimLength(
+                    readSet[0], params=params, processed_flag=processed_flag
+                )
+                masks_indel[3, :left] = True
+                masks_indel[3, -right:] = True
+                antimask_indel = np.all(~masks_indel, axis=0)
+                (
+                    F1R2_ARLR,
+                    F2R1_ARLR,
+                    indels,
+                    F1R2_ref_count,
+                    F1R2_alt_count,
+                    F2R1_ref_count,
+                    F2R1_alt_count
+                ) = genotypeDSIndel(readSet,tumorBam,antimask_indel,params)
+                DCS = np.logical_and(F1R2_ARLR>=params["pcutoff"],F2R1_ARLR>=params["pcutoff"])
+                pass_inds = np.nonzero(DCS)[0].tolist()
+                indels_pass = [indels[_] for _ in pass_inds]
+                coverage_indel[start_ind:end_ind_max][antimask_indel] += 1
+                if len(indels_pass) == 1:
+                    indel = indels_pass[0]
+                    indel_chrom = chromNow
+                    indel_pos = int(indel.split(":")[0])
+                    indel_size = int(indel.split(":")[1])
+                    if indel_size < 0:
+                        indel_ref = str(fasta[indel_chrom][indel_pos:indel_pos-indel_size+1].seq).upper()
+                        indel_alt = fasta[indel_chrom][indel_pos].upper()
+                    else:
+                        indel_ref = fasta[indel_chrom][indel_pos].upper()
+                        indel_alt = indel_ref + indel.split(":")[2]
+                    na, nr, ndp = extractDepthIndel(
+                        normalBam, indel_chrom, indel_pos+1, indel_ref, indel_alt
+                    )
+                    if na > params["maxAltCount"]:
+                        continue
+                    ta, tr, tdp = extractDepthIndel(
+                        tumorBam, indel_chrom, indel_pos+1, indel_ref, indel_alt
+                    )
+                    indel_rec = {
+                    "chrom": chromNow,
+                    "pos": indel_pos + 1,
+                    "ref": indel_ref,
+                    "alt": indel_alt,
+                    "infos": {
+                        "F1R2": F1R2,
+                        "F2R1": F2R1,
+                        "TG": F1R2_ARLR[pass_inds[0]],
+                        "BG": F2R1_ARLR[pass_inds[0]],
+                        "TC": ",".join(
+                            [
+                                str(F1R2_alt_count[pass_inds[0]]),
+                                str(F1R2_ref_count[pass_inds[0]]),
+                            ]
+                        ),
+                        "BC": ",".join(
+                            [
+                                str(F1R2_alt_count[pass_inds[0]]),
+                                str(F1R2_ref_count[pass_inds[0]]),
+                            ]
+                        ),
+                    },
+                    "formats": ["AC", "RC", "DP"],
+                    "samples": [[ta, tr, tdp], [na, nr, ndp]],
+                    }
+                    muts_indels.append(indel_rec)
+                
             else:
                 if isLearn:
                     if sum([int(seq.get_tag('NM')) for seq in readSet]) == 0:
                         continue
+                """
                 rs_reference_end = max([r.reference_end for r in readSet])
                 chromNow = readSet[0].reference_name
                 if (
@@ -487,6 +828,7 @@ def callBam(params, processNo, chunkSize):
                         params,
                         )
                     coverage = np.zeros(100000, dtype=int)
+                
                 ### Record read names to check if mate has been processed
                 processed_flag = 0
                 for seq in readSet:
@@ -519,6 +861,7 @@ def callBam(params, processNo, chunkSize):
                 ### If the whole reads are masked:
                 if not np.any(antimask):
                     continue
+                """
                 ### Calculate genotype probability
                 (
                     F1R2_ARLR,
@@ -539,6 +882,7 @@ def callBam(params, processNo, chunkSize):
                     mismatch_now = profileTriNucMismatches(
                         readSet,
                         ref_np[start_ind:end_ind],
+                        antimask,
                         params,
                     )
                     for trinuc in mismatch_dict.keys():
@@ -626,8 +970,6 @@ def callBam(params, processNo, chunkSize):
                         "ref": mut_ref,
                         "alt": mut_alt,
                         "infos": {
-                            "RP5": readPos5p,
-                            "RP3": readPos3p,
                             "F1R2": F1R2,
                             "F2R1": F2R1,
                             "TG": F1R2_ARLR[muts_ind[nn]],
@@ -668,4 +1010,5 @@ def callBam(params, processNo, chunkSize):
     if isLearn:
         print(FPs,RPs,muts)
         return mismatch_dict,FPs,RPs
-    return muts, total_coverage, recCount, duplex_count, duplex_read_num_dict
+    print(f"Process {processNo} finished. Time: {(time.time()-starttime)/60: .2f} minutes")
+    return muts, total_coverage, recCount, duplex_count, duplex_read_num_dict, muts_indels,total_coverage_indel

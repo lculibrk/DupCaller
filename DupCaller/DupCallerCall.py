@@ -15,6 +15,7 @@ import time
 from matplotlib import pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
+import copy
 
 
 if __name__ == "__main__":
@@ -38,11 +39,18 @@ if __name__ == "__main__":
         "-p", "--threads", type=int, help="prefix of the output files", default=1
     )
     parser.add_argument(
-        "-ae",
-        "--amperr",
+        "-aes",
+        "--amperrs",
         type=float,
-        help="estimated polymerase error rate",
+        help="estimated polymerase substitutionerror rate",
         default=1e-5,
+    )
+    parser.add_argument(
+        "-aei",
+        "--amperri",
+        type=float,
+        help="estimated polymerase indel error rate",
+        default=3e-7,
     )
     parser.add_argument(
         "-mr",
@@ -69,7 +77,6 @@ if __name__ == "__main__":
 
     parser.add_argument("-n", "--normalBam", type=str, help="deduplicated normal bam")
     parser.add_argument("-m", "--noise", type=str, help="noise mask")
-    parser.add_argument("-c", "--ncoverage", type=str, help="coverage bed of ")
     parser.add_argument(
         "-tt",
         "--trimF",
@@ -107,7 +114,8 @@ if __name__ == "__main__":
         "output": args.output,
         "regions": args.regions,
         "threads": args.threads,
-        "amperr": args.amperr,
+        "amperr": args.amperrs,
+        "amperri": args.amperri,
         "mutRate": args.mutRate,
         "pcutoff": args.threshold,
         "mapq": args.mapq,
@@ -117,7 +125,6 @@ if __name__ == "__main__":
         # "trim3DBS": args.trim3DBS,\
         "minNdepth": args.minNdepth,
         "maxAltCount": args.maxAltCount,
-        "ncoverage": args.ncoverage,  # "damage": args.damage
     }
     """
     Initialze run
@@ -231,6 +238,8 @@ if __name__ == "__main__":
         rec_nums = [_[2] for _ in results]
         duplex_nums = [_[3] for _ in results]
         duplex_read_nums = [_[4] for _ in results]
+        indels = [_[5] for _ in results]
+        coverages_indels = [_[6] for _ in results]
         print(
             "..............Completed bam calling in "
             + str((time.time() - startTime2) / 60)
@@ -250,11 +259,25 @@ if __name__ == "__main__":
                 take_ind.append(nnn)
                 muts_dict[mut] = 1
         mutsAll_new = [mutsAll[ind] for ind in take_ind]
-        mutsAll = mutsAll_new
+        mutsAll = copy.copy(mutsAll_new)
         muts_num = len(mutsAll)
         coverage = sum(coverages)
+        coverage_indel = sum(coverages_indels)
         rec_num = sum(rec_nums)
         duplex_num = sum(duplex_nums)
+        indelsAll = sum(indels, [])
+        indels_num = len(indelsAll)
+        indels_positions = [
+            indel["chrom"] + str(indel["pos"]) + indel["ref"] +":"+ indel["alt"] for indel in indelsAll
+        ]
+        indels_dict = dict()
+        take_ind = list()
+        for nnn, indel in enumerate(indels_positions):
+            if indels_dict.get(indel) is None:
+                take_ind.append(nnn)
+                indels_dict[mut] = 1
+        indelsAll_new = [indelsAll[ind] for ind in take_ind]
+        indelsAll = indelsAll_new
 
         duplex_combinations = list(
             set.union(*[set(d.keys()) for d in duplex_read_nums])
@@ -288,8 +311,6 @@ if __name__ == "__main__":
     infoDict = {
         "F1R2": [1, "Integer", "Number of F1R2 read(s) in the read bundle"],
         "F2R1": [1, "Integer", "Number of F2R1 read(s) in the read bundle"],
-        "RP5": [1, "Integer", "read position"],
-        "RP3": [1, "Integer", "distance from 3p"],
         "TG": [1, "Float", "Alt/Ref log likelihood ratio of top strand"],
         "BG": [1, "Float", "Alt/Ref log likelihood ratio of bottom strand"],
         "TC": [4, "Integer", "Top strand base count"],
@@ -302,10 +323,15 @@ if __name__ == "__main__":
     }
     filterDict = {"PASS": "All filter Passed"}
     vcfLines = createVcfStrings(chromDict, infoDict, formatDict, filterDict, mutsAll)
-    with open(args.output + "/"+args.output+".vcf", "w") as vcf:
+    with open(args.output + "/"+args.output+"_snv.vcf", "w") as vcf:
+        vcf.write(vcfLines)
+
+    vcfLines = createVcfStrings(chromDict, infoDict, formatDict, filterDict, indelsAll)
+    with open(args.output + "/"+args.output+"_indel.vcf", "w") as vcf:
         vcf.write(vcfLines)
 
     burden_naive = muts_num / coverage
+    indel_burden = indels_num / (coverage + coverage_indel)
     efficiency = duplex_num / rec_num
 
 
@@ -328,11 +354,11 @@ if __name__ == "__main__":
             f.write(f"{read_num}\t{duplex_read_num[read_num]}\t{duplex_coverage_by_group[read_num]}\t{muts_by_duplex_group[read_num]}\n")
     
     muts_by_group = np.loadtxt(params["output"] + "/"+args.output+"_duplex_group_stats.txt",skiprows=1,dtype=float,delimiter='\t',usecols=(2,3)).transpose()
-    burden_lstsq = np.linalg.lstsq(np.vstack([muts_by_group[0,:], np.ones(muts_by_group.shape[1])]).T,muts_by_group[1,:])[0][0]
+    burden_lstsq = np.linalg.lstsq(np.vstack([muts_by_group[0,:], np.ones(muts_by_group.shape[1])]).T,muts_by_group[1,:],rcond=None)[0][0]
     bootstrap_lstsqs = []
     for _ in range(10000):
         muts_by_group_resampled = np.random.default_rng().choice(muts_by_group,muts_by_group.shape[1],axis=1)
-        burden_lstsq_resampled = np.linalg.lstsq(np.vstack([muts_by_group_resampled[0,:], np.ones(muts_by_group.shape[1])]).T,muts_by_group_resampled[1,:])[0][0]
+        burden_lstsq_resampled = np.linalg.lstsq(np.vstack([muts_by_group_resampled[0,:], np.ones(muts_by_group.shape[1])]).T,muts_by_group_resampled[1,:],rcond=None)[0][0]
         bootstrap_lstsqs.append(burden_lstsq_resampled)
     bootstrap_lstsqs.sort()
     burden_lstsq_lci = bootstrap_lstsqs[250]
@@ -350,7 +376,7 @@ if __name__ == "__main__":
     plt.legend(handles=[lgd1,lgd2])
     plt.savefig(params["output"] + "/"+args.output+"_burden_by_duplex_group_size.png")
 
-    with open(params["output"] + "/"+args.output+"_summary.txt", "w") as f:
+    with open(params["output"] + "/"+args.output+"_snv_summary.txt", "w") as f:
         f.write(f"Number of Mutations\t{muts_num}\n")
         f.write(f"Effective Coverage\t{coverage}\n")
         f.write(f"Estimated Naive Burden\t{burden_naive}\n")
@@ -361,7 +387,16 @@ if __name__ == "__main__":
         f.write(f"Efficiency\t{efficiency}\n")
         f.write(f"Per Duplex Group Coverage \t{coverage/duplex_num}\n")       
 
-    
+    with open(params["output"] + "/"+args.output+"_indel_summary.txt", "w") as f:
+        f.write(f"Number of Mutations\t{indels_num}\n")
+        f.write(f"Effective Coverage\t{coverage+coverage_indel}\n")
+        f.write(f"Estimated Naive Burden\t{indel_burden}\n")
+        #f.write(f"Estimated Least-square Burden\t{burden_lstsq}\n")
+        #f.write(f"Least-square Burden Upper 95% CI\t{burden_lstsq_uci}\n")
+        #f.write(f"Least-square Burden Lower 95% CI\t{burden_lstsq_lci}\n")
+        #f.write(f"Duplex Group Number\t{duplex_num}\n")
+        #f.write(f"Efficiency\t{efficiency}\n")
+        #f.write(f"Per Duplex Group Coverage \t{coverage/duplex_num}\n")         
 
     print(
         "..............Completed variant calling "

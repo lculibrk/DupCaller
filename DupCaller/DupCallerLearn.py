@@ -40,7 +40,7 @@ if __name__ == "__main__":
         "--amperr",
         type=float,
         help="estimated polymerase error rate",
-        default=1e-5,
+        default=2e-4,
     )
     parser.add_argument(
         "-mr",
@@ -80,7 +80,7 @@ if __name__ == "__main__":
         "--trimR",
         type=int,
         help="ignore mutation if it is less than n bps from ends of read",
-        default=0,
+        default=15,
     )
     parser.add_argument(
         "-d",

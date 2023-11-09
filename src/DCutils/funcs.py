@@ -12,38 +12,6 @@ from pysam import TabixFile as BED
 import gzip
 
 
-"""
-def extractDepthSnv(bam,chrom,pos,ref,alt):
-    allele = []
-    for pileupcolumn in bam.pileup(chrom,pos-1,pos,ignore_orphans=False,min_base_quality=0):
-        if pileupcolumn.pos == pos - 1:
-            for pileupread in pileupcolumn.pileups:
-                #if pileupread.
-                if not pileupread.is_del and not pileupread.is_refskip and not pileupread.alignment.is_secondary and not pileupread.alignment.is_supplementary:
-                    allele.append(pileupread.alignment.query_sequence[pileupread.query_position])
-            break
-    alt_count = allele.count(alt)
-    ref_count = allele.count(ref)
-    alts_count = len(allele) - ref_count
-    depth = len(allele)
-    return alt_count,alts_count,ref_count,depth
-"""
-
-
-"""
-def extractDepthSnv(bam,chrom,pos,ref,alt):
-    pileupLine = check_output(["samtools","mpileup","-Q","1",bam,"-r",chrom+":"+str(pos)+"-"+str(pos)],stderr=subprocess.DEVNULL).decode('ascii')
-    infos = pileupLine.strip('\n').split('\t')
-    if len(infos) <= 1: return 0,0,0
-    depth = int(infos[3])
-    alleles = infos[4].upper()
-    altCount = alleles.count(alt)
-    refCount = alleles.count(ref)
-    return altCount,refCount,depth
-
-"""
-
-
 def findIndels(seq):
     refPos = seq.reference_start
     readPos = 0
@@ -66,8 +34,23 @@ def findIndels(seq):
             refPos += cigar[1]
     return indels
 
+def countUniqueBarcodes(barcodes):
+    if len(barcodes) == 0 : return 0
+    bcs = sorted(list(barcodes.keys()))
+    take_ind = [0]
+    for nn in range(1,len(bcs)):
+        string_diff = [a == b for a,b in zip(list(bcs[nn]),list(bcs[nn-1]))].count(False)
+        if string_diff >= 1: take_ind.append(nn)
+    bcs_uniq = [bcs[_] for _ in take_ind]
+    count = 0
+    bc_dict = dict()
+    for bc in bcs_uniq:
+        if not bc_dict.get(bc.split('+')[1]+ '+' +bc.split('+')[0]):
+            bc_dict[bc] = 1
+            count += 1
+    return count
 
-def extractDepthSnv(bam, chrom, pos, ref, alt):
+def extractDepthSnv(bam, chrom, pos, ref, alt,params):
     has_barcode = True
     for seq in bam.fetch(chrom, pos - 1, pos):
         if len(seq.query_name.split("_")[-1].split("+")) != 2:
@@ -76,6 +59,106 @@ def extractDepthSnv(bam, chrom, pos, ref, alt):
     if has_barcode:
         refReadBarcodes = {}
         altReadBarcodes = {}
+        otherReadBarcodes = {}
+        for pileupcolumn in bam.pileup(chrom, pos - 1, pos, min_base_quality=0,flag_filter=2816):
+            if pileupcolumn.pos == pos - 1:
+                for pileupread in pileupcolumn.pileups:
+                    if (
+                        pileupread.is_refskip
+                        or pileupread.alignment.is_secondary
+                        or pileupread.alignment.is_supplementary or pileupread.alignment.has_tag("DT") or pileupread.alignment.mapping_quality <= params["mapq"]
+                    ):
+                        continue
+                    barcodes = pileupread.alignment.query_name.split("_")[-1]
+                    if pileupread.is_del:
+                        if not otherReadBarcodes.get(barcodes):
+                            otherReadBarcodes[barcodes] = 1
+                    elif (
+                        pileupread.alignment.query_sequence[pileupread.query_position]
+                        == alt
+                    ):
+                        if not altReadBarcodes.get(barcodes):
+                            altReadBarcodes[barcodes] = 1
+                    elif pileupread.alignment.query_sequence[pileupread.query_position] == ref:
+                        if not refReadBarcodes.get(barcodes):
+                            refReadBarcodes[barcodes] = 1
+                    else:
+                        if not otherReadBarcodes.get(barcodes):
+                            otherReadBarcodes[barcodes] = 1
+        altAlleleCount = countUniqueBarcodes(altReadBarcodes)
+        refAlleleCount = countUniqueBarcodes(refReadBarcodes)
+        otherAlleleCount = countUniqueBarcodes(otherReadBarcodes)
+        depth = altAlleleCount+refAlleleCount+otherAlleleCount
+    else:
+        altAlleleCount = 0
+        refAlleleCount = 0
+        otherAlleleCount = 0
+        for pileupcolumn in bam.pileup(chrom, pos - 1, pos, min_base_quality=0):
+            if pileupcolumn.pos == pos - 1:
+                for pileupread in pileupcolumn.pileups:
+                    if (
+                        pileupread.is_refskip
+                        or pileupread.alignment.is_secondary
+                        or pileupread.alignment.is_supplementary
+                        or pileupread.alignment.is_duplicate or pileupread.alignment.mapping_quality <= params["mapq"]
+                    ):
+                        continue
+                    if pileupread.is_del:
+                        otherAlleleCount += 1
+                    elif (
+                        pileupread.alignment.query_sequence[pileupread.query_position]
+                        == alt
+                    ):
+                        altAlleleCount += 1
+                    elif pileupread.alignment.query_sequence[pileupread.query_position] == ref:
+                        refAlleleCount += 1
+                    else:
+                        otherAlleleCount += 1
+        depth = refAlleleCount + altAlleleCount + otherAlleleCount
+    return altAlleleCount, refAlleleCount, depth
+
+
+def extractDepthIndel(bam, chrom, pos, ref, alt,params):
+    has_barcode = True
+    for seq in bam.fetch(chrom, pos - 1, pos):
+        if len(seq.query_name.split("_")[-1].split("+")) != 2:
+            has_barcode = False
+        break
+    indel_size = len(alt)-len(ref)
+    if has_barcode:
+        refReadBarcodes = {}
+        altReadBarcodes = {}
+        otherReadBarcodes = {}
+        for pileupcolumn in bam.pileup(chrom, pos - 1, pos, min_base_quality=0,flag_filter=2816):
+            if pileupcolumn.pos == pos - 1:
+                for pileupread in pileupcolumn.pileups:
+                    if (
+                        pileupread.is_del
+                        or pileupread.is_refskip
+                        or pileupread.alignment.is_secondary
+                        or pileupread.alignment.is_supplementary or pileupread.alignment.has_tag("DT") or pileupread.alignment.mapping_quality <= params["mapq"]
+                    ):
+                        continue
+                    barcodes = pileupread.alignment.query_name.split("_")[-1]
+                    if (
+                        pileupread.indel == indel_size
+                    ):
+                        if not altReadBarcodes.get(barcodes):
+                            altReadBarcodes[barcodes] = 1
+                    elif pileupread.indel == 0:
+                        if not refReadBarcodes.get(barcodes):
+                            refReadBarcodes[barcodes] = 1
+                    else:
+                        if not otherReadBarcodes.get(barcodes):
+                            otherReadBarcodes[barcodes] = 1
+        altAlleleCount = countUniqueBarcodes(altReadBarcodes)
+        refAlleleCount = countUniqueBarcodes(refReadBarcodes)
+        otherAlleleCount = countUniqueBarcodes(otherReadBarcodes)
+        depth = altAlleleCount + refAlleleCount + otherAlleleCount
+    else:
+        altAlleleCount = 0
+        refAlleleCount = 0
+        otherAllelCount = 0
         for pileupcolumn in bam.pileup(chrom, pos - 1, pos, min_base_quality=0):
             if pileupcolumn.pos == pos - 1:
                 for pileupread in pileupcolumn.pileups:
@@ -84,33 +167,50 @@ def extractDepthSnv(bam, chrom, pos, ref, alt):
                         or pileupread.is_refskip
                         or pileupread.alignment.is_secondary
                         or pileupread.alignment.is_supplementary
+                        or pileupread.alignment.is_duplicate or pileupread.alignment.has_tag("DT") or pileupread.alignment.mapping_quality <= params["mapq"]
                     ):
                         continue
                     if (
-                        pileupread.alignment.query_sequence[pileupread.query_position]
-                        == alt
+                        pileupread.indel == indel_size
                     ):
-                        barcodes = pileupread.alignment.query_name.split("_")[-1].split(
-                            "+"
-                        )
-                        if not altReadBarcodes.get(
-                            barcodes[0] + "+" + barcodes[1]
-                        ) or not altReadBarcodes.get(barcodes[1] + "+" + barcodes[0]):
-                            altReadBarcodes.update({barcodes[0] + "+" + barcodes[1]: 1})
+                        altAlleleCount += 1
+                    elif pileupread.indel == 0:
+                        refAlleleCount += 1
                     else:
-                        barcodes = pileupread.alignment.query_name.split("_")[-1].split(
-                            "+"
-                        )
-                        if not refReadBarcodes.get(
-                            barcodes[0] + "+" + barcodes[1]
-                        ) or not refReadBarcodes.get(barcodes[1] + "+" + barcodes[0]):
-                            refReadBarcodes.update({barcodes[0] + "+" + barcodes[1]: 1})
-        altAlleleCount = len(altReadBarcodes.keys())
-        refAlleleCount = len(refReadBarcodes.keys())
-        depth = altAlleleCount + refAlleleCount
+                        otherAllelCount += 1
+        depth = refAlleleCount + altAlleleCount + otherAllelCount
+    return altAlleleCount, refAlleleCount, depth
+
+"""
+def extractDepthRegion(bam,chrom,start,end):
+    has_barcode = True
+    for seq in bam.fetch(chrom, start-1, start):
+        if len(seq.query_name.split("_")[-1].split("+")) != 2:
+            has_barcode = False
+        break
+    depth = np.zeros(end-start)
+    if has_barcode:
+        readBarcodes = {}
+        for pileupcolumn in bam.pileup(chrom, start, end, min_base_quality=0):
+            if pileupcolumn.pos < start: continue
+            if pileupcolumn.pos >= end: break
+            for pileupread in pileupcolumn.pileups:
+                if (
+                    pileupread.is_del
+                    or pileupread.is_refskip
+                    or pileupread.alignment.is_secondary
+                    or pileupread.alignment.is_supplementary
+                ):
+                    continue
+                barcodes = pileupread.alignment.query_name.split("_")[-1].split(
+                    "+"
+                )
+                if not readBarcodes.get(
+                    barcodes[0] + "+" + barcodes[1]
+                ) and not readBarcodes.get(barcodes[1] + "+" + barcodes[0]):
+                    readBarcodes.update({barcodes[0] + "+" + barcodes[1]: 1})
+            depth[pileupcolumn.pos - start] += len(readBarcodes.keys())
     else:
-        altAlleleCount = 0
-        refAlleleCount = 0
         for pileupcolumn in bam.pileup(chrom, pos - 1, pos, min_base_quality=0):
             if pileupcolumn.pos == pos - 1:
                 for pileupread in pileupcolumn.pileups:
@@ -122,49 +222,60 @@ def extractDepthSnv(bam, chrom, pos, ref, alt):
                         or pileupread.alignment.is_duplicate
                     ):
                         continue
-                    if (
-                        pileupread.alignment.query_sequence[pileupread.query_position]
-                        == alt
-                    ):
-                        altAlleleCount += 1
-                    else:
-                        refAlleleCount += 1
-        depth = altAlleleCount + refAlleleCount
-    return altAlleleCount, refAlleleCount, depth
-
-
-def extractDepthIndel(bam, chrom, pos, ref, alt):
-    if len(ref) == 1:
-        indelPos = str(pos) + "I"
+                    depth[pileupcolumn.pos - start] += 1
+    return depth
+"""
+def extractDepthRegion(bam,chrom,start,end,params):
+    has_barcode = True
+    for seq in bam.fetch(chrom, start-1, start):
+        if len(seq.query_name.split("_")[-1].split("+")) != 2:
+            has_barcode = False
+        break
+    depth = np.zeros(end-start)
+    if has_barcode:
+        processedBarcodes = {}
+        processed_read_names = {}
+        for rec in bam.fetch(chrom,start,end):
+            if rec.is_secondary or rec.is_supplementary or rec.is_qcfail or rec.has_tag("DT") or rec.mapping_quality <= params["mapq"]:
+                continue
+            barcodes = rec.query_name.split("_")[-1].split("+")
+            if processed_read_names.get(rec.query_name):
+                mate_cigar = rec.get_tag("MC")
+                re_cigar = re.search("(?:(\d+)S)?(\d+)M(?:(\d+)S)?", mate_cigar)
+                mate_reference_length = int(re_cigar.group(2))
+                overlap = max(
+                    0,
+                    rec.reference_length + mate_reference_length - abs(rec.template_length),
+                )
+                read_start = max(rec.reference_start + overlap,start)
+            else:
+                read_start = max(rec.reference_start, start)
+                processed_read_names[rec.query_name] = 1
+            if not processedBarcodes.get(barcodes[0] +'+'+barcodes[1]+ str(rec.reference_start)) and not processedBarcodes.get(barcodes[1] +'+'+barcodes[0] + str(rec.reference_start)):
+                read_end = min(rec.reference_end,end-1)
+                depth[read_start-start:read_end-start+1] += 1
+                processedBarcodes[barcodes[0] +'+'+barcodes[1]+ str(rec.reference_start)] = 1
     else:
-        indelPos = str(pos) + "D"
-    refReadBarcodes = {}
-    altReadBarcodes = {}
-    for read in bam.fetch(chrom, pos - 1, pos):
-        matchFlag = 0
-        if read.mapping_quality <= 30:
-            continue
-        if "I" in read.cigarstring or "D" in read.cigarstring:
-            indels = findIndels(read)
-            if indels.get(indelPos):
-                matchFlag = 1
-        if matchFlag == 1:
-            barcodes = read.query_name.split("_")[-1].split("+")
-            if not altReadBarcodes.get(
-                barcodes[0] + "+" + barcodes[1]
-            ) or not altReadBarcodes.get(barcodes[1] + "+" + barcodes[0]):
-                altReadBarcodes.update({barcodes[0] + "+" + barcodes[1]: 1})
-        else:
-            barcodes = read.query_name.split("_")[-1].split("+")
-            if not refReadBarcodes.get(
-                barcodes[0] + "+" + barcodes[1]
-            ) or not refReadBarcodes.get(barcodes[1] + "+" + barcodes[0]):
-                refReadBarcodes.update({barcodes[0] + "+" + barcodes[1]: 1})
-    altAlleleCount = len(altReadBarcodes.keys())
-    refAlleleCount = len(refReadBarcodes.keys())
-    depth = altAlleleCount + refAlleleCount
-    return altAlleleCount, refAlleleCount, depth
-
+        processed_read_names = {}
+        for rec in bam.fetch(chrom,start,end):
+            if rec.is_secondary or rec.is_supplementary or rec.is_qcfail or rec.has_tag("DT") or rec.mapping_quality <= params["mapq"]:
+                continue 
+            if processed_read_names.get(rec.query_name):
+                mate_cigar = rec.get_tag("MC")
+                re_cigar = re.search("(?:(\d+)S)?(\d+)M(?:(\d+)S)?", mate_cigar)
+                mate_reference_length = int(re_cigar.group(2))
+                overlap = max(
+                    0,
+                    rec.reference_length + mate_reference_length - abs(rec.template_length),
+                )
+                read_start = max(rec.reference_start + overlap,start)
+            else:
+                read_start = max(rec.reference_start, start)
+                processed_read_names[rec.query_name] = 1
+            if not rec.is_duplicate:
+                read_end = min(rec.reference_end,end-1)
+                depth[read_start-start:read_end-start+1] += 1         
+    return depth
 
 def createVcfStrings(chromDict, infoDict, formatDict, filterDict, recs):
     lines = ["##fileformat=VCFv4.2"]
@@ -278,7 +389,7 @@ def calculatePosterior(Pamp, Pref, Palt, prior_ref, prior_alt):
 
 
 def prepare_reference_mats(
-    chrom, start, end, reference_seq, germline_bed, noise_bed, n_cov_bed, params
+    chrom, start, end, reference_seq, germline_bed, noise_bed, nbam,params
 ):
     ### Define and Initialize
     af_miss = params["mutRate"]
@@ -307,9 +418,9 @@ def prepare_reference_mats(
                 if len(alt) == 1:
                     prior_mat[ind, base2num[alt]] = afs[ii]
                     has_snp = True
-                    if afs[ii] >= 0.01:
+                    if afs[ii] >= 0.001:
                         snp_mask[ind] = True
-                elif afs[ii] >= 0.01:
+                elif afs[ii] >= 0.001:
                     indel_mask[ind] = True
             if has_snp:
                 prior_mat[ind, base2num[ref]] = (
@@ -317,7 +428,7 @@ def prepare_reference_mats(
                 )
         if len(ref) != 1:
             for ii, alt in enumerate(rec.alts):
-                if afs[ii] >= 0.01:
+                if afs[ii] >= 0.001:
                     indel_mask[ind + 1 : ind + len(alt)] = True
 
     ### Preparep noise mask
@@ -325,10 +436,11 @@ def prepare_reference_mats(
         interval_start = max(rec.start, start)
         interval_end = min(rec.end, end)
         interval_len = interval_end - interval_start
-        interval_start_ind = interval_start - 1 - start
+        interval_start_ind = interval_start - start
         noise_mask[interval_start_ind : interval_start_ind + interval_len] = True
 
     ### Preparep normal coverage mask
+    """
     for rec in n_cov_bed.fetch(chrom, start, end, parser=pysam.asTuple()):
         depth = int(rec[3])
         if depth >= params["minNdepth"]:
@@ -336,8 +448,11 @@ def prepare_reference_mats(
         interval_start = max(int(rec[1]), start)
         interval_end = min(int(rec[2]), end)
         interval_len = interval_end - interval_start
-        interval_start_ind = interval_start - 1 - start
+        interval_start_ind = interval_start - start
         n_cov_mask[interval_start_ind : interval_start_ind + interval_len] = True
+    """
+    depth = extractDepthRegion(nbam,chrom,start,end,params)
+    n_cov_mask = (depth < params["minNdepth"])
     return prior_mat, snp_mask, indel_mask, noise_mask, n_cov_mask, reference_int
 
 
@@ -400,6 +515,7 @@ def genotypeDSSnv(seqs, reference_int, prior_mat, antimask, params):
             F1R2.append(seq)
         if (seq.is_read2 and seq.is_forward) or (seq.is_read1 and seq.is_reverse):
             F2R1.append(seq)
+
 
     ### Determine match length
 
@@ -524,7 +640,8 @@ def genotypeDSSnv(seqs, reference_int, prior_mat, antimask, params):
         F2R1_count_mat,
     )
 
-def genotypeDSIndel(seqs, bam, params):
+def genotypeDSIndel(seqs, bam, antimask, params):
+    prob_amp = params["amperri"]
     F1R2 = []
     F2R1 = []
     for seq in seqs:
@@ -570,68 +687,87 @@ def genotypeDSIndel(seqs, bam, params):
     """
     for nn, col in enumerate(bam.pileup(chrom, start, end, flag_filter=2816)):
         #indel_flag = 0
-        if col.reference_pos < start or col.reference_pos > end: continue
+        if col.reference_pos < start: continue
+        if col.reference_pos >= end: break
         for read in col.pileups:
-            if read.alignment.query_name in f1r2_names_dict or read.alignment.query_name in f2r1_names_dict:
-                if read.indel != 0:
-                    indel = str(col.reference_pos)+":"+str(read.indel)
+            if read.alignment.reference_start == start and (read.alignment.query_name in f1r2_names_dict or read.alignment.query_name in f2r1_names_dict):
+                if read.indel != 0 and antimask[col.reference_pos-read.alignment.reference_start]:
+                    if read.indel < 0:
+                        indel = str(col.reference_pos)+":"+str(read.indel)
+                    else:
+                        indel = str(col.reference_pos)+":"+str(read.indel)+":"+read.alignment.query_alignment_sequence[read.query_position+1:read.query_position+read.indel+1]
                     indels.append(indel)
+    indels = list(set(indels))
     m = len(indels)   
     f1r2_alt_seq_prob = np.zeros(m)
     f1r2_ref_seq_prob = np.zeros(m)      
     f2r1_alt_seq_prob = np.zeros(m)
-    f2r1_ref_seq_prob = np.zeros(m)             
+    f2r1_ref_seq_prob = np.zeros(m) 
+    f1r2_alt_count = np.zeros(m)
+    f1r2_ref_count = np.zeros(m)      
+    f2r1_alt_count = np.zeros(m)
+    f2r1_ref_count = np.zeros(m)          
     for nn,indel in enumerate(indels):
         indel_pos = int(indel.split(":")[0])
         indel_size= int(indel.split(":")[1])
-        for col in bam.pileup(chrom, indel_pos-1, indel_pos, flag_filter=2816): 
+        for col in bam.pileup(chrom, indel_pos-1, indel_pos, flag_filter=2816,min_base_quality=0): 
             if col.reference_pos != indel_pos: continue
             for read in col.pileups:
-                if read.alignment.query_name in f1r2_names_dict:
-                    #print(read.query_position,col.reference_pos,read.indel,indel_size)
-                    if read.indel == indel_size:
+                if read.alignment.query_name in f1r2_names_dict and read.alignment.reference_start == start:
+                    if read.indel == indel_size and (read.indel<0 or indel.split(":")[2]==read.alignment.query_alignment_sequence[read.query_position+1:read.query_position+read.indel+1]):
+                        read_pos = read.query_position
                         if indel_size < 0:
-                            read_pos = read.query_position
                             if read_pos <= 3: read_pos = 3
                             if read_pos >= len(read.alignment.query_alignment_qualities)-4: read_pos = len(read.alignment.query_alignment_qualities)-4
                             mean_qual = sum(read.alignment.query_alignment_qualities[read_pos-3:read_pos+4])/8
                         else:
-                            read_pos = read.query_position
                             mean_qual = sum(read.alignment.query_alignment_qualities[read_pos:read_pos+indel_size])/abs(indel_size)
                         f1r2_alt_seq_prob[nn] += mean_qual
+                        f1r2_alt_count[nn] += 1
                     else:
-                        if indel_size > 0:
-                            read_pos = read.query_position
-                            if read_pos <= 3: read_pos = 3
-                            if read_pos >= len(read.alignment.query_alignment_qualities)-4: read_pos = len(read.alignment.query_alignment_qualities)-4
-                            mean_qual = sum(read.alignment.query_alignment_qualities[read_pos-3:read_pos+4])/8
+                        read_pos = read.query_position
+                        if read_pos is None: 
+                            mean_qual = sum(read.alignment.query_alignment_qualities)/len(read.alignment.query_alignment_qualities)
+                        elif indel_size > 0:
+                            if read.indel > 0:
+                                mean_qual = sum(read.alignment.query_alignment_qualities[read_pos:read_pos+read.indel])/abs(read.indel)
+                            else:
+                                if read_pos <= 3: read_pos = 3
+                                if read_pos >= len(read.alignment.query_alignment_qualities)-4: read_pos = len(read.alignment.query_alignment_qualities)-4
+                                mean_qual = sum(read.alignment.query_alignment_qualities[read_pos-3:read_pos+4])/8
                         else:
-                            #print(read.query_position,indel,read.is_del,read)
                             read_pos = read.query_position
                             mean_qual = sum(read.alignment.query_alignment_qualities[read_pos:read_pos-indel_size])/abs(indel_size)
                         f1r2_ref_seq_prob[nn] += mean_qual
+                        f1r2_ref_count[nn] += 1
                     
-                elif read.alignment.query_name in f2r1_names_dict:
-                    if read.indel == indel_size:
+                elif read.alignment.query_name in f2r1_names_dict and read.alignment.reference_start == start:
+                    if read.indel == indel_size and (read.indel<0 or indel.split(":")[2]==read.alignment.query_alignment_sequence[read.query_position+1:read.query_position+read.indel+1]):
+                        read_pos = read.query_position
                         if indel_size < 0:
-                            read_pos = read.query_position
                             if read_pos <= 3: read_pos = 3
                             if read_pos >= len(read.alignment.query_alignment_qualities)-4: read_pos = len(read.alignment.query_alignment_qualities)-4
                             mean_qual = sum(read.alignment.query_alignment_qualities[read_pos-3:read_pos+4])/8
                         else:
-                            read_pos = read.query_position
-                            mean_qual = sum(read.alignment.query_alignment_qualities[read_pos:read_pos+read.indel_size])/abs(indel_size)
+                            mean_qual = sum(read.alignment.query_alignment_qualities[read_pos:read_pos+indel_size])/abs(indel_size)
                         f2r1_alt_seq_prob[nn] += mean_qual
+                        f2r1_alt_count[nn] += 1
                     else:
-                        if indel_size > 0:
-                            read_pos = read.query_position
-                            if read_pos <= 3: read_pos = 3
-                            if read_pos >= len(read.alignment.query_alignment_qualities)-4: read_pos = len(read.alignment.query_alignment_qualities)-4
-                            mean_qual = sum(read.alignment.query_alignment_qualities[read_pos-3:read_pos+4])/8
+                        read_pos = read.query_position
+                        if read_pos is None: 
+                            mean_qual = sum(read.alignment.query_alignment_qualities)/len(read.alignment.query_alignment_qualities)
+                        elif indel_size > 0:
+                            if read.indel > 0:
+                                mean_qual = sum(read.alignment.query_alignment_qualities[read_pos:read_pos+read.indel])/abs(read.indel)
+                            else:
+                                if read_pos <= 3: read_pos = 3
+                                if read_pos >= len(read.alignment.query_alignment_qualities)-4: read_pos = len(read.alignment.query_alignment_qualities)-4
+                                mean_qual = sum(read.alignment.query_alignment_qualities[read_pos-3:read_pos+4])/8
                         else:
                             read_pos = read.query_position
                             mean_qual = sum(read.alignment.query_alignment_qualities[read_pos:read_pos-indel_size])/abs(indel_size)
-                        f2r1_ref_seq_prob[nn] += mean_qual                      
+                        f2r1_ref_seq_prob[nn] += mean_qual
+                        f2r1_ref_count[nn] += 1      
         """
         for read in col.pileups:
             if read.alignment.query_name in f2r1_names_dict:
@@ -651,16 +787,31 @@ def genotypeDSIndel(seqs, bam, params):
                         f2r1_indels[indel] = mean_qual
                         f1r2_indels[indel] = 0
         """
+    prior_ref = log10(np.ones(m) * (1-params['mutRate']/35))
+    prior_alt = log10(np.ones(m) * params['mutRate']/35)
+    Pamp = log10(np.ones(m)*prob_amp)
     F1R2_ref_prob, F1R2_alt_prob = calculatePosterior(
-        Pamp, F1R2_ref_prob_mat, F1R2_alt_prob_mat, prior_ref, prior_alt
+        Pamp, -f1r2_ref_seq_prob/10, -f1r2_alt_seq_prob/10, prior_ref, prior_alt
     )
     F2R1_ref_prob, F2R1_alt_prob = calculatePosterior(
-        Pamp, F2R1_ref_prob_mat, F2R1_alt_prob_mat, prior_ref, prior_alt
+        Pamp, -f2r1_ref_seq_prob/10, -f2r1_alt_seq_prob/10, prior_ref, prior_alt
     )
     #for nn,muts 
-    return gt_mat
+    F1R2_ARLR = F1R2_alt_prob - F1R2_ref_prob
+    F2R1_ARLR = F2R1_alt_prob - F2R1_ref_prob
+    # print(F1R2_ref_qual_mat)
+    # print(F1R2_alt_qual_mat)
+    return (
+        F1R2_ARLR,
+        F2R1_ARLR,
+        indels,
+        f1r2_ref_count,
+        f1r2_alt_count,
+        f2r1_ref_count,
+        f2r1_alt_count,
+    )
 
-def profileTriNucMismatches(seqs,reference_int,params):
+def profileTriNucMismatches(seqs,reference_int,antimask,params):
     fasta = params["reference"]
     reverse_comp = {"A":"T",'T':"A","C":"G","G":"C"}
     base2num = {"A": 0, "T": 1, "C": 2, "G": 3}
@@ -686,8 +837,8 @@ def profileTriNucMismatches(seqs,reference_int,params):
     rightS = re_cigar.group(3) or 0
 
     n = min([seq.reference_length for seq in seqs])
-    F1R2_antimask = np.full(n,True)
-    F2R1_antimask = np.full(n,True)
+    F1R2_antimask = antimask
+    F2R1_antimask = antimask
     m_F1R2 = len(F1R2)
     m_F2R1 = len(F2R1)
 
