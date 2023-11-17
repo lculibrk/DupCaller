@@ -284,14 +284,14 @@ if __name__ == "__main__":
             f.write(
                 f"{trinuc}\t{mismatch_dict[trinuc][0]}\t{mismatch_dict[trinuc][1]}\t{mismatch_dict[trinuc][2]}\t{mismatch_dict[trinuc][3]}\n"
             )
-    FPs_count = [0 for _ in range(args.readLen)]
-    RPs_count = [0 for _ in range(args.readLen)]
-    for nn in range(args.readLen):
+    FPs_count = [0 for _ in range(max(FPs + RPs))]
+    RPs_count = [0 for _ in range(max(FPs + RPs))]
+    for nn in range(max(FPs + RPs)):
         FPs_count[nn] = FPs.count(nn + 1)
         RPs_count[nn] = RPs.count(nn + 1)
     with open(params["output"] + "/" + args.output + "_DBS_end_profile.txt", "w") as f:
         f.write("Distance\tMutations_fragment_end\tMutations_read_end\n")
-        for nn in range(args.readLen):
+        for nn in range(max(FPs + RPs)):
             f.write(f"{nn+1}\t{FPs_count[nn]}\t{RPs_count[nn]}\n")
     print(
         "..............Completed variant calling "
