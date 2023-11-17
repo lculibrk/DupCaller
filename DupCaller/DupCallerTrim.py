@@ -1,6 +1,5 @@
 import argparse
 from gzip import open as gzopen
-import os
 
 
 # from itertools import izip
@@ -71,8 +70,8 @@ if __name__ == "__main__":
         fq1 = gzopen(args.fq, "rt")
         fq2 = gzopen(args.fq2, "rt")
     else:
-        fq1 = open(args.fq, "r")
-        fq2 = open(args.fq2, "r")
+        fq1 = open(args.fq)
+        fq2 = open(args.fq2)
     with open(args.output + "_1.fastq", "w") as out1:
         out1.write("")
     with open(args.output + "_2.fastq", "w") as out2:

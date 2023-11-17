@@ -1,30 +1,34 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-from DCutils.splitBamRegions import splitBamRegions
-from DCutils.call import callBam
-from DCutils.funcs import createVcfStrings
-
 import argparse
-from collections import OrderedDict
-from Bio import SeqIO
+import copy
 import os
-from multiprocessing import Pool
-from pysam import AlignmentFile as BAM
-import pysam
 import time
-from matplotlib import pyplot as plt
+from collections import OrderedDict
+from multiprocessing import Pool
+
 import matplotlib.patches as mpatches
 import numpy as np
-import copy
 
+# import pysam
+from Bio import SeqIO
+from matplotlib import pyplot as plt
+from pysam import AlignmentFile as BAM
+
+from DCutils.call import callBam
+from DCutils.funcs import createVcfStrings
+from DCutils.splitBamRegions import splitBamRegions
 
 if __name__ == "__main__":
     """
     Parse Arguments
     """
     parser = argparse.ArgumentParser(description="Call any mutations from a bam file")
-    parser.add_argument("-b", "--bam", type=str, help="bam file")
-    parser.add_argument("-g", "--germline", type=str, help="indexed germline af vcf")
+    parser.add_argument(
+        "-b", "--bam", type=str, help="bam file of sample sequencing reads"
+    )
+    parser.add_argument(
+        "-g", "--germline", type=str, help="indexed germline vcf with AF field"
+    )
     parser.add_argument("-f", "--reference", type=str, help="reference fasta file")
     parser.add_argument("-o", "--output", type=str, help="prefix of the output files")
     parser.add_argument(
@@ -36,7 +40,7 @@ if __name__ == "__main__":
         default=["chr" + str(_) for _ in range(1, 23, 1)] + ["chrX", "chrY"],
     )
     parser.add_argument(
-        "-p", "--threads", type=int, help="prefix of the output files", default=1
+        "-p", "--threads", type=int, help="number of threads", default=1
     )
     parser.add_argument(
         "-aes",
@@ -75,7 +79,9 @@ if __name__ == "__main__":
     )
     # parser.add_argument('-da','--damage',type=float,default=5E-7)
 
-    parser.add_argument("-n", "--normalBam", type=str, help="deduplicated normal bam")
+    parser.add_argument(
+        "-n", "--normalBam", type=str, help="bam file of matched normal"
+    )
     parser.add_argument("-m", "--noise", type=str, help="noise mask")
     parser.add_argument(
         "-tt",
@@ -98,9 +104,27 @@ if __name__ == "__main__":
         help="minumum coverage in normal for called variants",
         default=10,
     )
-    parser.add_argument("-nad", "--maxAltCount", type=int, default=0)
-    parser.add_argument("-maf", "--maxAF", type=int, default=0.1)
-
+    parser.add_argument(
+        "-ma",
+        "--maxAF",
+        type=float,
+        help="maximum allele fraction to call a somatic mutation",
+        default=1,
+    )
+    parser.add_argument(
+        "-nad",
+        "--maxAltCount",
+        type=int,
+        help="maximum allele count of alt allele in matched-normal",
+        default=0,
+    )
+    parser.add_argument(
+        "-mnv",
+        "--maxMNVlen",
+        type=int,
+        help="maximum length of MNV to be considered a real mutation",
+        default=2,
+    )
     args = parser.parse_args()
 
     """
@@ -121,11 +145,22 @@ if __name__ == "__main__":
         "mapq": args.mapq,
         "noise": args.noise,
         "trim5": args.trimF,
-        "trim3": args.trimR,  # "trim5DBS": args.trim5DBS,\
-        # "trim3DBS": args.trim3DBS,\
+        "trim3": args.trimR,
         "minNdepth": args.minNdepth,
         "maxAltCount": args.maxAltCount,
+        "maxAF": args.maxAF,
+        "maxMnv": args.maxMNVlen,
     }
+    if not params["normalBam"]:
+        print(
+            f"A matched normal is not used. \
+            The maximum allele fraction to call a somatic mutation is set to be {args.maxAF}"
+        )
+    else:
+        print(
+            f"Matched normal: {args.normalBam}. \
+            The maximum allele fraction to call a somatic mutation is set to be {args.maxAF}"
+        )
     """
     Initialze run
     """
@@ -146,32 +181,64 @@ if __name__ == "__main__":
         Single-thread execution
         """
         print(".........Starting variant calling..............")
-        # contigs = [(r.strip('\n'),) for r in open(args.regions,'r').readlines()] # Only process contigs in region file
         paramsNow = params
         paramsNow["reference"] = fasta
         regions = params["regions"]
         paramsNow["regions"] = [
             (chrom, 0, bamObject.get_reference_length(chrom) - 1) for chrom in regions
         ]
-        mutsAll, coverage, rec_num, duplex_num, duplex_read_num_single = callBam(
-            paramsNow, 0, 1000000
-        )
+        (
+            mutsAll,
+            coverage,
+            rec_num,
+            duplex_num,
+            duplex_read_num_single,
+            indelsAll,
+            coverage_indel,
+            unique_read_num,
+            pass_read_num,
+        ) = callBam(paramsNow, 0, 1000000)
+        muts_positions = [
+            mut["chrom"] + str(mut["pos"]) + mut["ref"] + mut["alt"] for mut in mutsAll
+        ]
+        muts_dict = dict()
+        take_ind = list()
+        for nnn, mut in enumerate(muts_positions):
+            if muts_dict.get(mut) is None:
+                take_ind.append(nnn)
+                muts_dict[mut] = 1
+        mutsAll_new = [mutsAll[ind] for ind in take_ind]
+        mutsAll = copy.copy(mutsAll_new)
         muts_num = len(mutsAll)
+        indels_positions = [
+            indel["chrom"] + str(indel["pos"]) + indel["ref"] + ":" + indel["alt"]
+            for indel in indelsAll
+        ]
+        indels_dict = dict()
+        take_ind = list()
+        for nnn, indel in enumerate(indels_positions):
+            if indels_dict.get(indel) is None:
+                take_ind.append(nnn)
+                indels_dict[mut] = 1
+        indelsAll_new = [indelsAll[ind] for ind in take_ind]
+        indelsAll = copy.copy(indelsAll_new)
+        indels_num = len(indelsAll)
         duplex_combinations = list(duplex_read_num_single.keys())
         duplex_combinations.sort()
         duplex_read_num = OrderedDict(
-            {duplex_read_num_single[num] for num in duplex_combinations}
+            {num: duplex_read_num_single[num][0] for num in duplex_combinations}
         )
+        duplex_coverage_by_group = OrderedDict(
+            {num: duplex_read_num_single[num][1] for num in duplex_combinations}
+        )
+
     else:
         """
         Multi-thread execution
         """
-        # contigs = [r.strip('\n') for r in open(args.regions,'r').readlines()] # Only process contigs in region file
         contigs = args.regions
         contigLengths = [bamObject.get_reference_length(contig) for contig in contigs]
-        print(
-            "...........Spliting genomic regions for parallel execution................"
-        )
+        print("....Spliting genomic regions for parallel execution.....")
         cutSites, chunkSize = splitBamRegions(
             args.bam, args.threads, contigs
         )  # Split the whole genome for parallel execution
@@ -197,14 +264,9 @@ if __name__ == "__main__":
         regionSequence.append((contigs[site[0]], site[1]))
         for ii in range(site[0] + 1, len(contigs)):
             regionSequence.append((contigs[ii],))
-        print(
-            "............Completed region splitting in "
-            + str((time.time() - startTime) / 60)
-            + " minutes,loading reference genome.................."
-        )
 
         """
-        Start variant calling 
+        Start variant calling
         """
 
         callArguments = []
@@ -230,9 +292,7 @@ if __name__ == "__main__":
             callArgument = (paramsNow.copy(), nn, chunkSize)
             callArguments.append(callArgument)
             regions = []
-        results = pool.starmap(
-            callBam, callArguments
-        )  # each result return three list: number of duplex reads, effective lengths, list of mutations
+        results = pool.starmap(callBam, callArguments)
         muts = [_[0] for _ in results]
         coverages = [_[1] for _ in results]
         rec_nums = [_[2] for _ in results]
@@ -240,6 +300,8 @@ if __name__ == "__main__":
         duplex_read_nums = [_[4] for _ in results]
         indels = [_[5] for _ in results]
         coverages_indels = [_[6] for _ in results]
+        unique_read_nums = [_[7] for _ in results]
+        pass_read_nums = [_[8] for _ in results]
         print(
             "..............Completed bam calling in "
             + str((time.time() - startTime2) / 60)
@@ -265,10 +327,13 @@ if __name__ == "__main__":
         coverage_indel = sum(coverages_indels)
         rec_num = sum(rec_nums)
         duplex_num = sum(duplex_nums)
+        unique_read_num = sum(unique_read_nums)
+        pass_read_num = sum(pass_read_nums)
         indelsAll = sum(indels, [])
         indels_num = len(indelsAll)
         indels_positions = [
-            indel["chrom"] + str(indel["pos"]) + indel["ref"] +":"+ indel["alt"] for indel in indelsAll
+            indel["chrom"] + str(indel["pos"]) + indel["ref"] + ":" + indel["alt"]
+            for indel in indelsAll
         ]
         indels_dict = dict()
         take_ind = list()
@@ -285,13 +350,13 @@ if __name__ == "__main__":
         duplex_combinations.sort()
         duplex_read_num = OrderedDict(
             {
-                num: sum([d.get(num, [0,0])[0] for d in duplex_read_nums])
+                num: sum([d.get(num, [0, 0])[0] for d in duplex_read_nums])
                 for num in duplex_combinations
             }
         )
         duplex_coverage_by_group = OrderedDict(
             {
-                num: sum([d.get(num, [0,0])[1] for d in duplex_read_nums])
+                num: sum([d.get(num, [0, 0])[1] for d in duplex_read_nums])
                 for num in duplex_combinations
             }
         )
@@ -300,14 +365,6 @@ if __name__ == "__main__":
     contigs = tBam.references
     # print(contigs)
     chromDict = {contig: tBam.get_reference_length(contig) for contig in contigs}
-
-    """
-    infoDict = {"SS":[1,"Float","Somatic Score of variant"],"NM":[1,"Float","mean NM of alt read group"],"AS":[1,"Float","mean AS of the read group"],"XS":[1,"Float","mean XS of the read group"],\
-    "RP5":[1,"Integer","read position"],"RP3":[1,"Integer","distance from 3p"]}
-    formatDict = {"AC":[1,"Integer","Count of alt allele"],"RC":[1,"Integer","Count of ref allele"],"DP":[1,"Integer","Depth at the location"],\
-    "DC":[1,"Integer","Number of reads in the duplex group"]}
-    filterDict = {"PASS":"All filter Passed"}
-    """
     infoDict = {
         "F1R2": [1, "Integer", "Number of F1R2 read(s) in the read bundle"],
         "F2R1": [1, "Integer", "Number of F2R1 read(s) in the read bundle"],
@@ -323,20 +380,25 @@ if __name__ == "__main__":
     }
     filterDict = {"PASS": "All filter Passed"}
     vcfLines = createVcfStrings(chromDict, infoDict, formatDict, filterDict, mutsAll)
-    with open(args.output + "/"+args.output+"_snv.vcf", "w") as vcf:
+    with open(args.output + "/" + args.output + "_snv.vcf", "w") as vcf:
         vcf.write(vcfLines)
 
     vcfLines = createVcfStrings(chromDict, infoDict, formatDict, filterDict, indelsAll)
-    with open(args.output + "/"+args.output+"_indel.vcf", "w") as vcf:
+    with open(args.output + "/" + args.output + "_indel.vcf", "w") as vcf:
         vcf.write(vcfLines)
 
-    burden_naive = muts_num / coverage
+    burden_naive = muts_num / (coverage)
     indel_burden = indels_num / (coverage + coverage_indel)
     efficiency = duplex_num / rec_num
+    pass_duprate = unique_read_num / pass_read_num
 
-
-    with open(params["output"] + "/"+args.output+"_duplex_group_stats.txt", "w") as f:
-        f.write(f"duplex_group_strand_composition\tduplex_group_number\teffective_coverage\tmutation_count\n")
+    with open(
+        params["output"] + "/" + args.output + "_duplex_group_stats.txt", "w"
+    ) as f:
+        f.write(
+            "duplex_group_strand_composition\tduplex_group_number\t\
+            effective_coverage\tmutation_count\n"
+        )
         muts_by_duplex_group = OrderedDict()
         non_zero_keys = []
         for read_num in duplex_read_num.keys():
@@ -346,57 +408,85 @@ if __name__ == "__main__":
         for mut in mutsAll:
             TC_total = int(mut["infos"]["F1R2"])
             BC_total = int(mut["infos"]["F2R1"])
-            if muts_by_duplex_group.get(str(TC_total) + '+' + str(BC_total)) is not None:
-                muts_by_duplex_group[str(TC_total) + '+' + str(BC_total)] += 1
+            if (
+                muts_by_duplex_group.get(str(TC_total) + "+" + str(BC_total))
+                is not None
+            ):
+                muts_by_duplex_group[str(TC_total) + "+" + str(BC_total)] += 1
             else:
-                muts_by_duplex_group[str(BC_total) + '+' + str(TC_total)] += 1
+                muts_by_duplex_group[str(BC_total) + "+" + str(TC_total)] += 1
         for read_num in non_zero_keys:
-            f.write(f"{read_num}\t{duplex_read_num[read_num]}\t{duplex_coverage_by_group[read_num]}\t{muts_by_duplex_group[read_num]}\n")
-    
-    muts_by_group = np.loadtxt(params["output"] + "/"+args.output+"_duplex_group_stats.txt",skiprows=1,dtype=float,delimiter='\t',usecols=(2,3)).transpose()
-    burden_lstsq = np.linalg.lstsq(np.vstack([muts_by_group[0,:], np.ones(muts_by_group.shape[1])]).T,muts_by_group[1,:],rcond=None)[0][0]
+            f.write(
+                f"{read_num}\t{duplex_read_num[read_num]}\t\
+                {duplex_coverage_by_group[read_num]}\t{muts_by_duplex_group[read_num]}\n"
+            )
+
+    muts_by_group = np.loadtxt(
+        params["output"] + "/" + args.output + "_duplex_group_stats.txt",
+        skiprows=1,
+        dtype=float,
+        delimiter="\t",
+        usecols=(2, 3),
+    ).transpose()
+    burden_lstsq = np.linalg.lstsq(
+        np.vstack([muts_by_group[0, :], np.ones(muts_by_group.shape[1])]).T,
+        muts_by_group[1, :],
+        rcond=None,
+    )[0][0]
     bootstrap_lstsqs = []
     for _ in range(10000):
-        muts_by_group_resampled = np.random.default_rng().choice(muts_by_group,muts_by_group.shape[1],axis=1)
-        burden_lstsq_resampled = np.linalg.lstsq(np.vstack([muts_by_group_resampled[0,:], np.ones(muts_by_group.shape[1])]).T,muts_by_group_resampled[1,:],rcond=None)[0][0]
+        muts_by_group_resampled = np.random.default_rng().choice(
+            muts_by_group, muts_by_group.shape[1], axis=1
+        )
+        burden_lstsq_resampled = np.linalg.lstsq(
+            np.vstack(
+                [muts_by_group_resampled[0, :], np.ones(muts_by_group.shape[1])]
+            ).T,
+            muts_by_group_resampled[1, :],
+            rcond=None,
+        )[0][0]
         bootstrap_lstsqs.append(burden_lstsq_resampled)
     bootstrap_lstsqs.sort()
     burden_lstsq_lci = bootstrap_lstsqs[250]
     burden_lstsq_uci = bootstrap_lstsqs[9750]
-    x = np.linspace(0,muts_by_group[0,:].max()*1.1)
-    plt.scatter(muts_by_group[0,:],muts_by_group[1,:])
-    plt.plot(x,burden_lstsq*x,color='r')
-    plt.plot(x,burden_lstsq_lci*x,color='r',linestyle='dashed')
-    plt.plot(x,burden_lstsq_uci*x,color='r',linestyle='dashed')
-    plt.plot(x,burden_naive*x,color='b')
+    x = np.linspace(0, muts_by_group[0, :].max() * 1.1)
+    plt.scatter(muts_by_group[0, :], muts_by_group[1, :])
+    plt.plot(x, burden_lstsq * x, color="r")
+    plt.plot(x, burden_lstsq_lci * x, color="r", linestyle="dashed")
+    plt.plot(x, burden_lstsq_uci * x, color="r", linestyle="dashed")
+    plt.plot(x, burden_naive * x, color="b")
     plt.xlabel("Coverage")
     plt.ylabel("Mutation Count")
-    lgd1 = mpatches.Patch(color='red', label='Least Square')
-    lgd2 = mpatches.Patch(color='blue', label='Naive')
-    plt.legend(handles=[lgd1,lgd2])
-    plt.savefig(params["output"] + "/"+args.output+"_burden_by_duplex_group_size.png")
+    lgd1 = mpatches.Patch(color="red", label="Least Square")
+    lgd2 = mpatches.Patch(color="blue", label="Naive")
+    plt.legend(handles=[lgd1, lgd2])
+    plt.savefig(
+        params["output"] + "/" + args.output + "_burden_by_duplex_group_size.png"
+    )
 
-    with open(params["output"] + "/"+args.output+"_snv_summary.txt", "w") as f:
-        f.write(f"Number of Mutations\t{muts_num}\n")
+    with open(params["output"] + "/" + args.output + "_stats.txt", "w") as f:
+        f.write(f"Number of Unique Reads\t{unique_read_num}\n")
+        f.write(f"Number of Pass-filter Reads\t{pass_read_num}\n")
+        f.write(f"Number of Effective Read Families\t{duplex_num}\n")
         f.write(f"Effective Coverage\t{coverage}\n")
+        f.write(f"Per Read Family Coverage \t{coverage/duplex_num}\n")
+        f.write(
+            f"Pass-filter Duplication Rate\t\
+        {unique_read_num/pass_read_num}\n"
+        )
+        f.write(f"Efficiency\t{efficiency}\n")
+
+    with open(params["output"] + "/" + args.output + "_snv_burden.txt", "w") as f:
+        f.write(f"Number of Mutations\t{muts_num}\n")
         f.write(f"Estimated Naive Burden\t{burden_naive}\n")
         f.write(f"Estimated Least-square Burden\t{burden_lstsq}\n")
         f.write(f"Least-square Burden Upper 95% CI\t{burden_lstsq_uci}\n")
         f.write(f"Least-square Burden Lower 95% CI\t{burden_lstsq_lci}\n")
-        f.write(f"Duplex Group Number\t{duplex_num}\n")
-        f.write(f"Efficiency\t{efficiency}\n")
-        f.write(f"Per Duplex Group Coverage \t{coverage/duplex_num}\n")       
 
-    with open(params["output"] + "/"+args.output+"_indel_summary.txt", "w") as f:
+    with open(params["output"] + "/" + args.output + "_indel_burden.txt", "w") as f:
         f.write(f"Number of Mutations\t{indels_num}\n")
         f.write(f"Effective Coverage\t{coverage+coverage_indel}\n")
         f.write(f"Estimated Naive Burden\t{indel_burden}\n")
-        #f.write(f"Estimated Least-square Burden\t{burden_lstsq}\n")
-        #f.write(f"Least-square Burden Upper 95% CI\t{burden_lstsq_uci}\n")
-        #f.write(f"Least-square Burden Lower 95% CI\t{burden_lstsq_lci}\n")
-        #f.write(f"Duplex Group Number\t{duplex_num}\n")
-        #f.write(f"Efficiency\t{efficiency}\n")
-        #f.write(f"Per Duplex Group Coverage \t{coverage/duplex_num}\n")         
 
     print(
         "..............Completed variant calling "

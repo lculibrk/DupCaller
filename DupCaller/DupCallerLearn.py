@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-from DCutils.splitBamRegions import splitBamRegions
+import argparse
+import os
+import time
+from multiprocessing import Pool
+
+import pysam
+from Bio import SeqIO
+from matplotlib import pyplot as plt
+from pysam import AlignmentFile as BAM
+
 from DCutils.call import callBam
 from DCutils.funcs import createVcfStrings
-
-import argparse
-from collections import OrderedDict
-from Bio import SeqIO
-import os
-from multiprocessing import Pool
-from pysam import AlignmentFile as BAM
-import pysam
-import time
-from matplotlib import pyplot as plt
-
+from DCutils.splitBamRegions import splitBamRegions
 
 if __name__ == "__main__":
     """
     Parse Arguments
     """
     parser = argparse.ArgumentParser(description="Call any mutations from a bam file")
-    parser.add_argument("-b", "--bam", type=str, help="bam file")
-    parser.add_argument("-g", "--germline", type=str, help="indexed germline af vcf")
+    parser.add_argument(
+        "-b", "--bam", type=str, help="bam file of sample sequencing reads"
+    )
+    parser.add_argument(
+        "-g", "--germline", type=str, help="indexed germline vcf with AF field"
+    )
     parser.add_argument("-f", "--reference", type=str, help="reference fasta file")
     parser.add_argument("-o", "--output", type=str, help="prefix of the output files")
     parser.add_argument(
@@ -33,14 +35,21 @@ if __name__ == "__main__":
         default=["chr" + str(_) for _ in range(1, 23, 1)] + ["chrX", "chrY"],
     )
     parser.add_argument(
-        "-p", "--threads", type=int, help="prefix of the output files", default=1
+        "-p", "--threads", type=int, help="number of threads", default=1
     )
     parser.add_argument(
-        "-ae",
-        "--amperr",
+        "-aes",
+        "--amperrs",
         type=float,
-        help="estimated polymerase error rate",
-        default=2e-4,
+        help="estimated polymerase substitutionerror rate",
+        default=1e-5,
+    )
+    parser.add_argument(
+        "-aei",
+        "--amperri",
+        type=float,
+        help="estimated polymerase indel error rate",
+        default=3e-7,
     )
     parser.add_argument(
         "-mr",
@@ -65,9 +74,10 @@ if __name__ == "__main__":
     )
     # parser.add_argument('-da','--damage',type=float,default=5E-7)
 
-    parser.add_argument("-n", "--normalBam", type=str, help="deduplicated normal bam")
+    parser.add_argument(
+        "-n", "--normalBam", type=str, help="bam file of matched normal"
+    )
     parser.add_argument("-m", "--noise", type=str, help="noise mask")
-    parser.add_argument("-c", "--ncoverage", type=str, help="coverage bed of ")
     parser.add_argument(
         "-tt",
         "--trimF",
@@ -80,7 +90,7 @@ if __name__ == "__main__":
         "--trimR",
         type=int,
         help="ignore mutation if it is less than n bps from ends of read",
-        default=15,
+        default=0,
     )
     parser.add_argument(
         "-d",
@@ -89,9 +99,27 @@ if __name__ == "__main__":
         help="minumum coverage in normal for called variants",
         default=10,
     )
-    parser.add_argument("-nad", "--maxAltCount", type=int, default=0)
-    parser.add_argument("-maf", "--maxAF", type=int, default=0.1)
-    parser.add_argument("-rl", "--readLen", type=int, default=134)
+    parser.add_argument(
+        "-ma",
+        "--maxAF",
+        type=float,
+        help="maximum allele fraction to call a somatic mutation",
+        default=1,
+    )
+    parser.add_argument(
+        "-nad",
+        "--maxAltCount",
+        type=int,
+        help="maximum allele count of alt allele in matched-normal",
+        default=0,
+    )
+    parser.add_argument(
+        "-mnv",
+        "--maxMNVlen",
+        type=int,
+        help="maximum length of MNV to be considered a real mutation",
+        default=2,
+    )
     args = parser.parse_args()
 
     """
@@ -105,18 +133,29 @@ if __name__ == "__main__":
         "output": args.output,
         "regions": args.regions,
         "threads": args.threads,
-        "amperr": args.amperr,
+        "amperr": args.amperrs,
+        "amperri": args.amperri,
         "mutRate": args.mutRate,
         "pcutoff": args.threshold,
         "mapq": args.mapq,
         "noise": args.noise,
         "trim5": args.trimF,
-        "trim3": args.trimR,  # "trim5DBS": args.trim5DBS,\
-        # "trim3DBS": args.trim3DBS,\
+        "trim3": args.trimR,
         "minNdepth": args.minNdepth,
         "maxAltCount": args.maxAltCount,
-        "ncoverage": args.ncoverage,  # "damage": args.damage
+        "maxAF": args.maxAF,
+        "maxMnv": args.maxMNVlen,
     }
+    if not params["normalBam"]:
+        print(
+            f"A matched normal is not used. \
+            The maximum allele fraction to call a somatic mutation is set to be {args.maxAF}"
+        )
+    else:
+        print(
+            f"Matched normal: {args.normalBam}. \
+            The maximum allele fraction to call a somatic mutation is set to be {args.maxAF}"
+        )
     """
     Initialze run
     """
@@ -143,9 +182,7 @@ if __name__ == "__main__":
         paramsNow["regions"] = [
             (chrom, 0, bamObject.get_reference_length(chrom) - 1) for chrom in regions
         ]
-        mismatch,FPs,RPs = callBam(
-            paramsNow, 0, 1000000
-        )
+        mismatch, FPs, RPs = callBam(paramsNow, 0, 1000000)
     else:
         """
         Multi-thread execution
@@ -228,30 +265,34 @@ if __name__ == "__main__":
         pool.terminate()
         pool.join()
         mismatch_dicts = [_[0] for _ in results]
-        FPs = sum([_[1] for _ in results],[])
-        RPs = sum([_[2] for _ in results],[])
+        FPs = sum([_[1] for _ in results], [])
+        RPs = sum([_[2] for _ in results], [])
         mismatch_dict = dict()
-        #print(mismatch_dicts)
-        for minus_base in ['A','T','C','G']:
-            for ref_base in ['C','T']:
-                    for plus_base in ['A','T','C','G']:
-                        mismatch_dict[minus_base+ref_base + plus_base] = [0,0,0,0]
+        # print(mismatch_dicts)
+        for minus_base in ["A", "T", "C", "G"]:
+            for ref_base in ["C", "T"]:
+                for plus_base in ["A", "T", "C", "G"]:
+                    mismatch_dict[minus_base + ref_base + plus_base] = [0, 0, 0, 0]
         for trinuc in mismatch_dicts[0].keys():
             for nnn in range(4):
                 mismatch_dict[trinuc][nnn] = sum(_[trinuc][nnn] for _ in mismatch_dicts)
-    with open(params["output"] + "/"+args.output+"_mismatch_trinuc_profile.txt", "w") as f:
+    with open(
+        params["output"] + "/" + args.output + "_mismatch_trinuc_profile.txt", "w"
+    ) as f:
         f.write("\tA\tT\tC\tG\n")
         for trinuc in mismatch_dict.keys():
-            f.write(f"{trinuc}\t{mismatch_dict[trinuc][0]}\t{mismatch_dict[trinuc][1]}\t{mismatch_dict[trinuc][2]}\t{mismatch_dict[trinuc][3]}\n")
+            f.write(
+                f"{trinuc}\t{mismatch_dict[trinuc][0]}\t{mismatch_dict[trinuc][1]}\t{mismatch_dict[trinuc][2]}\t{mismatch_dict[trinuc][3]}\n"
+            )
     FPs_count = [0 for _ in range(args.readLen)]
-    RPs_count = [0 for _ in range(args.readLen)] 
+    RPs_count = [0 for _ in range(args.readLen)]
     for nn in range(args.readLen):
-        FPs_count[nn] = FPs.count(nn+1)
-        RPs_count[nn] = RPs.count(nn+1)
-    with open(params["output"] + "/"+args.output+"_DBS_end_profile.txt", "w") as f:
+        FPs_count[nn] = FPs.count(nn + 1)
+        RPs_count[nn] = RPs.count(nn + 1)
+    with open(params["output"] + "/" + args.output + "_DBS_end_profile.txt", "w") as f:
         f.write("Distance\tMutations_fragment_end\tMutations_read_end\n")
         for nn in range(args.readLen):
-            f.write(f"{nn+1}\t{FPs_count[nn]}\t{RPs_count[nn]}\n")   
+            f.write(f"{nn+1}\t{FPs_count[nn]}\t{RPs_count[nn]}\n")
     print(
         "..............Completed variant calling "
         + str((time.time() - startTime) / 60)
