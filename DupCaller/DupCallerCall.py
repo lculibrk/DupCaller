@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import copy
 import os
 import time
 from collections import OrderedDict
@@ -16,7 +15,7 @@ from pysam import AlignmentFile as BAM
 
 from DCutils.call import callBam
 from DCutils.funcs import createVcfStrings
-from DCutils.splitBamRegions import splitBamRegions
+from DCutils.funcs import splitBamRegions
 
 if __name__ == "__main__":
     """
@@ -125,6 +124,13 @@ if __name__ == "__main__":
         help="maximum length of MNV to be considered a real mutation",
         default=2,
     )
+    parser.add_argument(
+        "-x",
+        "--panel",
+        type=bool,
+        help="enable panel region splitting. Must be set if the input data is from small targeted panel",
+        default=False,
+    )
     args = parser.parse_args()
 
     """
@@ -197,23 +203,28 @@ if __name__ == "__main__":
             coverage_indel,
             unique_read_num,
             pass_read_num,
+            FPAll,
+            RPAll,
         ) = callBam(paramsNow, 0, 1000000)
         muts_positions = [
             mut["chrom"] + str(mut["pos"]) + mut["ref"] + mut["alt"] for mut in mutsAll
         ]
         muts_dict = dict()
         take_ind = list()
+        """
         for nnn, mut in enumerate(muts_positions):
             if muts_dict.get(mut) is None:
                 take_ind.append(nnn)
                 muts_dict[mut] = 1
         mutsAll_new = [mutsAll[ind] for ind in take_ind]
         mutsAll = copy.copy(mutsAll_new)
+        """
         muts_num = len(mutsAll)
         indels_positions = [
             indel["chrom"] + str(indel["pos"]) + indel["ref"] + ":" + indel["alt"]
             for indel in indelsAll
         ]
+        """
         indels_dict = dict()
         take_ind = list()
         for nnn, indel in enumerate(indels_positions):
@@ -222,6 +233,7 @@ if __name__ == "__main__":
                 indels_dict[mut] = 1
         indelsAll_new = [indelsAll[ind] for ind in take_ind]
         indelsAll = copy.copy(indelsAll_new)
+        """
         indels_num = len(indelsAll)
         duplex_combinations = list(duplex_read_num_single.keys())
         duplex_combinations.sort()
@@ -239,16 +251,20 @@ if __name__ == "__main__":
         contigs = args.regions
         contigLengths = [bamObject.get_reference_length(contig) for contig in contigs]
         print("....Spliting genomic regions for parallel execution.....")
-        cutSites, chunkSize = splitBamRegions(
-            args.bam, args.threads, contigs
-        )  # Split the whole genome for parallel execution
+        if not args.panel:
+            cutSites, chunkSize = splitBamRegions(
+                args.bam, args.threads, contigs
+            )  # Split the whole genome for parallel execution
+        else:
+            cutSites, chunkSize = splitBamRegions(
+                args.bam, args.threads, contigs, fast=False
+            )
         regionSequence = []
         currentContigIndex = 0
 
         """
         Determine regions for each process
         """
-
         for nn, site in enumerate(cutSites[1:]):
             pSite = cutSites[nn]
             if site[0] == pSite[0]:
@@ -302,6 +318,8 @@ if __name__ == "__main__":
         coverages_indels = [_[6] for _ in results]
         unique_read_nums = [_[7] for _ in results]
         pass_read_nums = [_[8] for _ in results]
+        FPs = [_[9] for _ in results]
+        RPs = [_[10] for _ in results]
         print(
             "..............Completed bam calling in "
             + str((time.time() - startTime2) / 60)
@@ -316,12 +334,14 @@ if __name__ == "__main__":
         ]
         muts_dict = dict()
         take_ind = list()
+        """
         for nnn, mut in enumerate(muts_positions):
             if muts_dict.get(mut) is None:
                 take_ind.append(nnn)
                 muts_dict[mut] = 1
         mutsAll_new = [mutsAll[ind] for ind in take_ind]
         mutsAll = copy.copy(mutsAll_new)
+        """
         muts_num = len(mutsAll)
         coverage = sum(coverages)
         coverage_indel = sum(coverages_indels)
@@ -335,6 +355,7 @@ if __name__ == "__main__":
             indel["chrom"] + str(indel["pos"]) + indel["ref"] + ":" + indel["alt"]
             for indel in indelsAll
         ]
+        """
         indels_dict = dict()
         take_ind = list()
         for nnn, indel in enumerate(indels_positions):
@@ -343,6 +364,7 @@ if __name__ == "__main__":
                 indels_dict[mut] = 1
         indelsAll_new = [indelsAll[ind] for ind in take_ind]
         indelsAll = indelsAll_new
+        """
 
         duplex_combinations = list(
             set.union(*[set(d.keys()) for d in duplex_read_nums])
@@ -360,6 +382,8 @@ if __name__ == "__main__":
                 for num in duplex_combinations
             }
         )
+        FPAll = sum(FPs, [])
+        RPAll = sum(RPs, [])
 
     tBam = BAM(args.bam, "rb")
     contigs = tBam.references
@@ -463,6 +487,24 @@ if __name__ == "__main__":
     plt.savefig(
         params["output"] + "/" + args.output + "_burden_by_duplex_group_size.png"
     )
+
+    FPs_count = [0 for _ in range(max(FPAll + RPAll))]
+    RPs_count = [0 for _ in range(max(FPAll + RPAll))]
+    for nn in range(max(FPAll + RPAll)):
+        FPs_count[nn] = FPAll.count(nn + 1)
+        RPs_count[nn] = RPAll.count(nn + 1)
+    with open(
+        params["output"] + "/" + args.output + "_DBS_end_profile_call.txt", "w"
+    ) as f:
+        f.write("Distance\tMutations_fragment_end\tMutations_read_end\n")
+        for nn in range(max(FPAll + RPAll)):
+            f.write(f"{nn+1}\t{FPs_count[nn]}\t{RPs_count[nn]}\n")
+    plt.figure()
+    plt.hist(FPAll, bins=range(0, max(FPAll)))
+    plt.savefig(params["output"] + "/" + args.output + "_fragment_end_distance.png")
+    plt.figure()
+    plt.hist(RPAll, bins=range(0, max(RPAll)))
+    plt.savefig(params["output"] + "/" + args.output + "_read_end_distance.png")
 
     with open(params["output"] + "/" + args.output + "_stats.txt", "w") as f:
         f.write(f"Number of Unique Reads\t{unique_read_num}\n")

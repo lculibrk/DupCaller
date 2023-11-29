@@ -27,7 +27,10 @@ def callBam(params, processNo, chunkSize):
     bam = params["tumorBam"]
     nbam = params["normalBam"]
     regions = params["regions"]
-    germline = VCF(params["germline"], "rb")
+    if params["germline"]:
+        germline = VCF(params["germline"], "rb")
+    else:
+        germline = None
     reference = params["reference"]
     minMapq = params["mapq"]
     mutRate = params["mutRate"]
@@ -53,8 +56,6 @@ def callBam(params, processNo, chunkSize):
             for plus_base in ["A", "T", "C", "G"]:
                 mismatch_dict[minus_base + ref_base + plus_base] = [0, 0, 0, 0]
 
-    print("Process" + str(processNo) + ": Initiated")
-
     # Initialize
     total_coverage = 0
     total_coverage_indel = 0
@@ -78,6 +79,18 @@ def callBam(params, processNo, chunkSize):
     reference_mat_start = 0
     locus_bed = gzip.open(output + "_coverage.bed.gz", "wb")
     processed_read_names = set()
+    if len(regions[0]) == 1:
+        region_start = regions[0][0] + ":0"
+    else:
+        region_start = regions[0][0] + ":" + str(regions[0][1])
+    if len(regions[-1]) != 3:
+        regions_end = (
+            regions[-1][0] + ":" + str(tumorBam.get_reference_length(regions[-1][0]))
+        )
+    else:
+        regions_end = regions[-1][0] + ":" + str(regions[-1][2])
+
+    print(f"Process {str(processNo)}: Initiated. Regions:{region_start}-{regions_end}")
 
     for rec, region in bamIterateMultipleRegion(tumorBam, regions):
         recCount += 1
@@ -86,15 +99,7 @@ def callBam(params, processNo, chunkSize):
             usedTime = currentTime - lastTime
             lastTime = currentTime
             print(
-                "Process"
-                + str(processNo)
-                + ": processed "
-                + str(recCount)
-                + " reads in "
-                + f"{currentTime : .2f}"
-                + " minutes. Time for process last 1000000 reads:"
-                + f"{usedTime : .2f}"
-                + " minutes."
+                f"Process {str(processNo)}: processed {str(recCount)} reads in {currentTime : .2f} minutes. Time for process last 1000000 reads:{usedTime : .2f} minutes. Current position:{rec.reference_name}:{rec.reference_start}. End Position:{regions_end}"
             )
 
             currentCheckPoint += 1000000
@@ -360,8 +365,8 @@ def callBam(params, processNo, chunkSize):
                                 + ":"
                                 + str(indel_alt)
                             )
-                            if indel_dict.get(indel_str):
-                                continue
+                            # if indel_dict.get(indel_str):
+                            # continue
                             ta, tr, tdp = extractDepthIndel(
                                 tumorBam,
                                 indel_chrom,
@@ -376,21 +381,22 @@ def callBam(params, processNo, chunkSize):
                                 continue
                             if ta > 1:
                                 germline_flag = False
-                                for var in germline.fetch(
-                                    indel_chrom, indel_pos, indel_pos + 1
-                                ):
-                                    for alt in var.alts:
-                                        offset = min(len(alt), len(var.ref)) - 1
-                                        pos_norm = var.pos + offset
-                                        ref_norm = var.ref[offset:]
-                                        alt_norm = alt[offset:]
-                                        if (
-                                            pos_norm == indel_pos + 1
-                                            and ref_norm == var.ref
-                                            and alt_norm == alt
-                                        ):
-                                            germline_flag = True
-                                            break
+                                if germline:
+                                    for var in germline.fetch(
+                                        indel_chrom, indel_pos, indel_pos + 1
+                                    ):
+                                        for alt in var.alts:
+                                            offset = min(len(alt), len(var.ref)) - 1
+                                            pos_norm = var.pos + offset
+                                            ref_norm = var.ref[offset:]
+                                            alt_norm = alt[offset:]
+                                            if (
+                                                pos_norm == indel_pos + 1
+                                                and ref_norm == var.ref
+                                                and alt_norm == alt
+                                            ):
+                                                germline_flag = True
+                                                break
                                 if germline_flag:
                                     continue
                             if normalBam:
@@ -501,6 +507,7 @@ def callBam(params, processNo, chunkSize):
                             mut_ind + start_ind + reference_mat_start + 1
                             for mut_ind in muts_ind
                         ]
+                        """
                         if len(mut_positions) > 1:
                             break_flag = 0
                             for nn in range(1, len(mut_positions)):
@@ -508,6 +515,7 @@ def callBam(params, processNo, chunkSize):
                                     break_flag = 1
                             if break_flag:
                                 continue
+                        """
                         NMs = [seq.get_tag("NM") for seq in readSet]
                         averageNM = sum(NMs) / len(NMs)
                         if averageNM - len(mut_positions) > 1:
@@ -519,10 +527,10 @@ def callBam(params, processNo, chunkSize):
                             mut_pos = mut_positions[nn]
                             mut_ref = num2base[ref_int[muts_ind[nn]]]
                             mut_alt = num2base[alt_int[muts_ind[nn]]]
-                            if muts_dict.get(
-                                "_".join([mut_chrom, str(mut_pos), mut_ref, mut_alt])
-                            ):
-                                continue
+                            # if muts_dict.get(
+                            # "_".join([mut_chrom, str(mut_pos), mut_ref, mut_alt])
+                            # ):
+                            # continue
                             ta, tr, tdp = extractDepthSnv(
                                 tumorBam, mut_chrom, mut_pos, mut_ref, mut_alt, params
                             )
@@ -532,16 +540,17 @@ def callBam(params, processNo, chunkSize):
                                 continue
                             if ta > 1:
                                 germline_flag = False
-                                for var in germline.fetch(
-                                    mut_chrom, mut_pos - 1, mut_pos
-                                ):
-                                    if (
-                                        len(var.ref) == 1
-                                        and var.ref == mut_ref
-                                        and var.alts[0] == mut_alt
+                                if germline:
+                                    for var in germline.fetch(
+                                        mut_chrom, mut_pos - 1, mut_pos
                                     ):
-                                        germline_flag = True
-                                        break
+                                        if (
+                                            len(var.ref) == 1
+                                            and var.ref == mut_ref
+                                            and var.alts[0] == mut_alt
+                                        ):
+                                            germline_flag = True
+                                            break
                                 if germline_flag:
                                     continue
                             if normalBam:
@@ -553,7 +562,7 @@ def callBam(params, processNo, chunkSize):
                                     mut_alt,
                                     params,
                                 )
-                                if ndp - nr > params["maxAltCount"]:
+                                if na > params["maxAltCount"]:
                                     continue
                                 if ndp < params["minNdepth"]:
                                     continue
@@ -799,8 +808,8 @@ def callBam(params, processNo, chunkSize):
                         + ":"
                         + str(indel_alt)
                     )
-                    if indel_dict.get(indel_str):
-                        continue
+                    # if indel_dict.get(indel_str):
+                    # continue
                     ta, tr, tdp = extractDepthIndel(
                         tumorBam,
                         indel_chrom,
@@ -815,21 +824,22 @@ def callBam(params, processNo, chunkSize):
                         continue
                     if ta > 1:
                         germline_flag = False
-                        for var in germline.fetch(
-                            indel_chrom, indel_pos, indel_pos + 1
-                        ):
-                            for alt in var.alts:
-                                offset = min(len(alt), len(var.ref)) - 1
-                                pos_norm = var.pos + offset
-                                ref_norm = var.ref[offset:]
-                                alt_norm = alt[offset:]
-                                if (
-                                    pos_norm == indel_pos + 1
-                                    and ref_norm == var.ref
-                                    and alt_norm == alt
-                                ):
-                                    germline_flag = True
-                                    break
+                        if germline:
+                            for var in germline.fetch(
+                                indel_chrom, indel_pos, indel_pos + 1
+                            ):
+                                for alt in var.alts:
+                                    offset = min(len(alt), len(var.ref)) - 1
+                                    pos_norm = var.pos + offset
+                                    ref_norm = var.ref[offset:]
+                                    alt_norm = alt[offset:]
+                                    if (
+                                        pos_norm == indel_pos + 1
+                                        and ref_norm == var.ref
+                                        and alt_norm == alt
+                                    ):
+                                        germline_flag = True
+                                        break
                         if germline_flag:
                             continue
                     if normalBam:
@@ -937,6 +947,7 @@ def callBam(params, processNo, chunkSize):
                     mut_ind + start_ind + reference_mat_start + 1
                     for mut_ind in muts_ind
                 ]
+                """
                 if len(mut_positions) > 1:
                     break_flag = 0
                     for nn in range(1, len(mut_positions)):
@@ -944,6 +955,7 @@ def callBam(params, processNo, chunkSize):
                             break_flag = 1
                     if break_flag:
                         continue
+                """
                 NMs = [seq.get_tag("NM") for seq in readSet]
                 averageNM = sum(NMs) / len(NMs)
                 if averageNM - len(mut_positions) > 1:
@@ -955,10 +967,10 @@ def callBam(params, processNo, chunkSize):
                     mut_pos = mut_positions[nn]
                     mut_ref = num2base[ref_int[muts_ind[nn]]]
                     mut_alt = num2base[alt_int[muts_ind[nn]]]
-                    if muts_dict.get(
-                        "_".join([mut_chrom, str(mut_pos), mut_ref, mut_alt])
-                    ):
-                        continue
+                    # if muts_dict.get(
+                    # "_".join([mut_chrom, str(mut_pos), mut_ref, mut_alt])
+                    # ):
+                    # continue
                     ta, tr, tdp = extractDepthSnv(
                         tumorBam, mut_chrom, mut_pos, mut_ref, mut_alt, params
                     )
@@ -968,14 +980,15 @@ def callBam(params, processNo, chunkSize):
                         continue
                     if ta > 1:
                         germline_flag = False
-                        for var in germline.fetch(mut_chrom, mut_pos - 1, mut_pos):
-                            if (
-                                len(var.ref) == 1
-                                and var.ref == mut_ref
-                                and var.alts[0] == mut_alt
-                            ):
-                                germline_flag = True
-                                break
+                        if germline:
+                            for var in germline.fetch(mut_chrom, mut_pos - 1, mut_pos):
+                                if (
+                                    len(var.ref) == 1
+                                    and var.ref == mut_ref
+                                    and var.alts[0] == mut_alt
+                                ):
+                                    germline_flag = True
+                                    break
                         if germline_flag:
                             continue
 
@@ -983,7 +996,7 @@ def callBam(params, processNo, chunkSize):
                         na, nr, ndp = extractDepthSnv(
                             normalBam, mut_chrom, mut_pos, mut_ref, mut_alt, params
                         )
-                        if ndp - nr > params["maxAltCount"]:
+                        if na > params["maxAltCount"]:
                             continue
                         if ndp < params["minNdepth"]:
                             continue
@@ -1046,7 +1059,6 @@ def callBam(params, processNo, chunkSize):
     Calling block ends
     """
     if isLearn:
-        print(FPs, RPs, muts)
         return mismatch_dict, FPs, RPs
     print(
         f"Process {processNo} finished. Time: {(time.time()-starttime)/60: .2f} minutes"
@@ -1061,4 +1073,6 @@ def callBam(params, processNo, chunkSize):
         total_coverage_indel,
         unique_read_num,
         pass_read_num,
+        FPs,
+        RPs,
     )

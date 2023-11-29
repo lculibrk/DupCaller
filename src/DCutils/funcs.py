@@ -1,5 +1,5 @@
 import re
-
+import math
 import numpy as np
 import pysam
 from Bio import SeqIO
@@ -8,6 +8,86 @@ from pysam import TabixFile as BED
 from pysam import VariantFile as VCF
 from pysam import index as indexBam
 from scipy.stats import binom
+
+
+def splitBamRegions(bam, num, contigs, fast=True):
+    if fast:
+        # jobQueue = Queue()
+        # jobLock = Lock()
+        # resultQueue = Queue()
+        bamObject = BAM(bam, "rb")
+        bamStats = bamObject.get_index_statistics()
+        readNumber = 0
+        contigCountsDict = {}
+        for stat in bamStats:
+            if stat.contig in contigs:
+                readNumber += stat.total
+                contigCountsDict.update({stat.contig: stat.total})
+        # readNumber = bamObject.count()
+        chunkSize = math.ceil(readNumber / num)
+        tidList = [bamObject.get_tid(c) for c in contigs]
+
+        contigCounts = [contigCountsDict[contig] for contig in contigs]
+        contigCountsAll = [0 for c in range(bamObject.nreferences)]
+        for nn, contig in enumerate(contigs):
+            currentTid = bamObject.get_tid(contig)
+            contigCountsAll[currentTid] = contigCounts[nn]
+        contigCountsTuple = tuple(contigCountsAll)
+        print(contigCounts)
+        contigLengths = [
+            bamObject.get_reference_length(contig) for contig in bamObject.references
+        ]
+        chunkSize = int(sum(contigCounts) / num)
+        # currentCount = 0
+        # outBams = [BAM(outPrefix+'_'+str(nn)+".bam",'wb',header=bamObject.header) for nn in range(num)]
+        # currentRegionIndex = 0
+        cutSite = [(0, 0)]
+        leftChunkSize = chunkSize
+        currentContigCount = 0
+        tidPointer = 0
+        while len(cutSite) < num:
+            if contigCounts[0] == 0:
+                contigCounts.pop(0)
+                # tidList.pop(0)
+                tidPointer += 1
+                currentContigCount = 0
+            elif leftChunkSize > contigCounts[0]:
+                leftChunkSize -= contigCounts.pop(0)
+                # tidList.pop(0)
+                tidPointer += 1
+                currentContigCount = 0
+            else:
+                currentContigCount += leftChunkSize
+                contigCounts[0] -= leftChunkSize
+                cutSite.append(
+                    (
+                        tidPointer,
+                        int(
+                            float(currentContigCount)
+                            / float(contigCountsTuple[tidList[tidPointer]])
+                            * contigLengths[tidList[tidPointer]]
+                        ),
+                    )
+                )
+                leftChunkSize = chunkSize
+        return cutSite, chunkSize
+    else:
+        bamObject = BAM(bam, "rb")
+        bamStats = bamObject.get_index_statistics()
+        readNumber = 0
+        cutSites = [(0, 0)]
+        for stat in bamStats:
+            if stat.contig in contigs:
+                readNumber += stat.total
+        chunkSize = math.ceil(readNumber / num)
+        currentReadNum = 0
+        for nn, contig in enumerate(contigs):
+            for rec in bamObject.fetch(contig):
+                currentReadNum += 1
+                if currentReadNum >= chunkSize:
+                    cutSites += [(nn, rec.reference_start)]
+                    currentReadNum = 0
+        return cutSites, chunkSize
 
 
 def findIndels(seq):
@@ -352,11 +432,11 @@ def calculatePosterior(Pamp, Pref, Palt, prior_ref, prior_alt):
 
     first_term = log10(1 + 2 * Pamp * Pref - Pamp - Pref)
     second_term = log10(Pamp + Palt - Pamp * Palt)
-    ref_prob = prior_ref + first_term + second_term
+    ref_prob = first_term + second_term + prior_ref
 
     first_term = log10(1 + 2 * Pamp * Palt - Pamp - Palt)
     second_term = log10(Pamp + Pref - Pamp * Pref)
-    alt_prob = prior_alt + first_term + second_term
+    alt_prob = first_term + second_term + prior_alt
     return ref_prob, alt_prob
 
 
@@ -380,52 +460,36 @@ def prepare_reference_mats(
     prior_mat[np.ogrid[:m], reference_int] = 1 - 3 * af_miss
 
     ### Adjust by germline
-    for rec in germline_bed.fetch(chrom, start, end):
-        ind = rec.pos - 1 - start
-        ref = rec.ref
-        afs = rec.info["AF"]
-        if len(ref) == 1:
-            # has_snp = False
-            for ii, alt in enumerate(rec.alts):
-                if len(alt) == 1:
-                    prior_mat[ind, base2num[alt]] = afs[ii]
-                    has_snp = True
+    if germline_bed != None:
+        for rec in germline_bed.fetch(chrom, start, end):
+            ind = rec.pos - 1 - start
+            ref = rec.ref
+            afs = rec.info["AF"]
+            if len(ref) == 1:
+                for ii, alt in enumerate(rec.alts):
+                    if len(alt) == 1:
+                        prior_mat[ind, base2num[alt]] = afs[ii]
+                        has_snp = True
+                        if afs[ii] >= 0.001:
+                            snp_mask[ind] = True
+                    elif afs[ii] >= 0.001:
+                        indel_mask[ind] = True
+            if len(ref) != 1:
+                for ii, alt in enumerate(rec.alts):
+                    if len(alt) == len(ref):
+                        diff = np.array([a != b for a, b in zip(list(ref), list(alt))])
+                        if ind >= 0:
+                            if afs[ii] >= 0.001:
+                                snp_mask[ind : ind + len(alt)][
+                                    diff[: (snp_mask.size - ind)]
+                                ] = True
+                        else:
+                            if afs[ii] >= 0.001:
+                                snp_mask[: min(snp_mask.size - ind, diff.size) + ind][
+                                    diff[-ind : min(snp_mask.size - ind, diff.size)]
+                                ] = True
                     if afs[ii] >= 0.001:
-                        snp_mask[ind] = True
-                elif afs[ii] >= 0.001:
-                    indel_mask[ind] = True
-            # if has_snp:
-            # prior_mat[ind, base2num[ref]] = (
-            # 1 - np.delete(prior_mat[ind, :], base2num[ref]).sum()
-            # )
-        if len(ref) != 1:
-            for ii, alt in enumerate(rec.alts):
-                if len(alt) == len(ref):
-                    diff = np.array([a != b for a, b in zip(list(ref), list(alt))])
-                    if ind >= 0:
-                        # for nn,is_diff in enumerate(diff[:min(snp_mask.size-ind,diff.size)]):
-                        # if is_diff:
-                        # prior_mat[ind+nn,base2num[alt[nn]]] = afs[ii]
-                        # prior_mat[ind+nn, base2num[ref[nn]]] = (
-                        # 1 - np.delete(prior_mat[ind+nn, :], base2num[ref[nn]]).sum()
-                        # )
-                        if afs[ii] >= 0.001:
-                            snp_mask[ind : ind + len(alt)][
-                                diff[: (snp_mask.size - ind)]
-                            ] = True
-                    else:
-                        if afs[ii] >= 0.001:
-                            snp_mask[: min(snp_mask.size - ind, diff.size) + ind][
-                                diff[-ind : min(snp_mask.size - ind, diff.size)]
-                            ] = True
-
-                            # if is_diff:
-                            # prior_mat[nn,base2num[alt[nn-ind]]] = afs[ii]
-                            # prior_mat[nn,base2num[ref[nn-ind]]] = (
-                            # 1 - np.delete(prior_mat[nn, :], base2num[ref[nn-ind]]).sum()
-                            # )
-                if afs[ii] >= 0.001:
-                    indel_mask[max(ind, 0) : ind + len(alt)] = True
+                        indel_mask[max(ind, 0) : ind + len(alt)] = True
     ### Preparep noise mask
     for rec in noise_bed.fetch(chrom, start, end, parser=pysam.asBed()):
         interval_start = max(rec.start, start)
@@ -600,6 +664,8 @@ def genotypeDSSnv(seqs, reference_int, prior_mat, antimask, params):
     F2R1_ARLR[antimask] = F2R1_ARLR_masked
     # print(F1R2_ref_qual_mat)
     # print(F1R2_alt_qual_mat)
+    # if seqs[0].query_name.split('_')[1] == 'CGG+TAC' or seqs[0].query_name.split('_')[1] == 'TAC+CGG':
+    # print(F1R2_ARLR,F2R1_ARLR,antimask)
     return (
         F1R2_ARLR,
         F2R1_ARLR,
