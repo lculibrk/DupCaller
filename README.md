@@ -15,7 +15,7 @@ The complete DupCaller pipeline also requires the following tools for data prepr
 **INSTALLATION**
 The tool uses pip for installing scripts and prerequisites. To install DupCaller, simply clone this repository and install via pip:
 
-bash```
+```bash
 git clone https://github.com/AlexandrovLab/DupCaller.git
 cd DupCaller
 pip install .
@@ -27,7 +27,7 @@ pip install .
 
 DupCallerTrim.py is a scripts that can extract 5-prime barcodes from paired-end fastqs. The usage is as follows:
 
-bash```
+```bash
 DupCallerTrim.py -i read1.fq -i2 read2.fq -p barcode_pattern -o sample_name
 ```
 
@@ -46,7 +46,7 @@ Use a DNA NGS aligner, such as BWA-MEM, to align the trimmed fastqs of both samp
 ```bash
 bwa mem -t {threads} -R "@RG\tID:{sample_name}\tSM:{sample_name}\tPL:ILLUMINA" reference.fa {sample_name}\_1.fastq {sample_name}\_2.fastq | samtools sort -@ {threads} > {sample_name}.bam
 samtools index -@ {threads} {sample_name}.bam
-````
+```
 
 where
 'threads' is the number of cores used for aligning
