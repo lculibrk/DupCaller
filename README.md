@@ -14,20 +14,21 @@ The complete DupCaller pipeline also requires the following tools for data prepr
 
 **INSTALLATION**
 The tool uses pip for installing scripts and prerequisites. To install DupCaller, simply clone this repository and install via pip:
+
 bash```
 git clone https://github.com/AlexandrovLab/DupCaller.git
 cd DupCaller
 pip install .
-```
+````
 
 **Pipeline**
 
 #### Trim barcodes from reads:
 
 DupCallerTrim.py is a scripts that can extract 5-prime barcodes from paired-end fastqs. The usage is as follows:
+
 bash```
 DupCallerTrim.py -i read1.fq -i2 read2.fq -p barcode_pattern -o sample_name
-
 ````
 
 where
