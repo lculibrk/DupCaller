@@ -11,12 +11,12 @@ The complete DupCaller pipeline also requires the following tools for data prepr
 
 - BWA version 0.7.17 (https://bio-bwa.sourceforge.net)
 - GATK version 4.2.6 (https://github.com/broadinstitute/gatk/releases)
-  **INSTALLATION**
-  The tool uses pip for installing scripts and prerequisites. To install DupCaller, simply clone this repository and install via pip:
-  bash
-  git clone https://github.com/AlexandrovLab/DupCaller.git
-  cd DupCaller
-  pip install .
+**INSTALLATION**
+The tool uses pip for installing scripts and prerequisites. To install DupCaller, simply clone this repository and install via pip:
+bash
+git clone https://github.com/AlexandrovLab/DupCaller.git
+cd DupCaller
+pip install .
 
 **Pipeline**
 
