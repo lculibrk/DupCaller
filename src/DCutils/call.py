@@ -270,6 +270,7 @@ def callBam(params, processNo, chunkSize):
                         )
                         coverage = np.zeros(100000, dtype=int)
                         coverage_indel = np.zeros(100000, dtype=int)
+
                     ### Record read names to check if mate has been processed
                     processed_flag = 0
                     for seq in readSet:
@@ -379,6 +380,7 @@ def callBam(params, processNo, chunkSize):
                                 continue
                             if ta == 0:
                                 continue
+                            """
                             if ta > 1:
                                 germline_flag = False
                                 if germline:
@@ -399,6 +401,7 @@ def callBam(params, processNo, chunkSize):
                                                 break
                                 if germline_flag:
                                     continue
+                            """
                             if normalBam:
                                 na, nr, ndp = extractDepthIndel(
                                     normalBam,
@@ -538,6 +541,7 @@ def callBam(params, processNo, chunkSize):
                                 continue
                             if ta == 0:
                                 continue
+                            """
                             if ta > 1:
                                 germline_flag = False
                                 if germline:
@@ -553,6 +557,7 @@ def callBam(params, processNo, chunkSize):
                                             break
                                 if germline_flag:
                                     continue
+                            """
                             if normalBam:
                                 na, nr, ndp = extractDepthSnv(
                                     normalBam,
@@ -822,6 +827,7 @@ def callBam(params, processNo, chunkSize):
                         continue
                     if ta == 0:
                         continue
+                    """
                     if ta > 1:
                         germline_flag = False
                         if germline:
@@ -842,6 +848,7 @@ def callBam(params, processNo, chunkSize):
                                         break
                         if germline_flag:
                             continue
+                    """
                     if normalBam:
                         na, nr, ndp = extractDepthIndel(
                             normalBam,
@@ -978,6 +985,7 @@ def callBam(params, processNo, chunkSize):
                         continue
                     if ta == 0:
                         continue
+                    """
                     if ta > 1:
                         germline_flag = False
                         if germline:
@@ -991,7 +999,7 @@ def callBam(params, processNo, chunkSize):
                                     break
                         if germline_flag:
                             continue
-
+                    """
                     if normalBam:
                         na, nr, ndp = extractDepthSnv(
                             normalBam, mut_chrom, mut_pos, mut_ref, mut_alt, params
