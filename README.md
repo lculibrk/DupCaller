@@ -1,15 +1,11 @@
 # DupCaller
 
-# DupCaller
-
 [![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://osf.io/s93d5/wiki/home/) [![License](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg)](https://opensource.org/licenses/BSD-2-Clause) [![Build Status](https://travis-ci.com/AlexandrovLab/SigProfilerMatrixGenerator.svg?branch=master)](https://app.travis-ci.com/AlexandrovLab/SigProfilerMatrixGenerator)
 [![Uptime Robot status](https://img.shields.io/uptimerobot/status/m795312784-02766a79f207f67626cef289)](https://stats.uptimerobot.com/jjqW4Ulymx)
 
-# DupCaller
-
 DupCaller is a universal tool for calling somatic mutations and calculating somatic mutational burden from barcoded error-corrected next generation sequencing (ecNGS) data with matched normal (e.x. NanoSeq).
 
-**Prerequisites\***
+**Prerequisites**
 DupCaller requires python>=3.10 to run. Earlier versions may be sufficient to run DupCaller and have not been tested.
 The complete DupCaller pipeline also requires the following tools for data preprocessing. The versions are used by the developer and other versions may or may not work.
 
@@ -22,16 +18,15 @@ The complete DupCaller pipeline also requires the following tools for data prepr
   cd DupCaller
   pip install .
 
-```
-
 **Pipeline**
 
 #### Trim barcodes from reads:
 
 DupCallerTrim.py is a scripts that can extract 5-prime barcodes from paired-end fastqs. The usage is as follows:
-bash
+bash```
 DupCallerTrim.py -i read1.fq -i2 read2.fq -p barcode_pattern -o sample_name
-```
+
+````
 
 where
 'read1.fq' and 'read2.fq' are fastq files from read1 and read2 of the paired-end sequencing data, respectively. Both unzipped and gzip compressed files can be correctly processed.
@@ -48,7 +43,7 @@ Use a DNA NGS aligner, such as BWA-MEM, to align the trimmed fastqs of both samp
 ```bash
 bwa mem -t {threads} -R "@RG\tID:{sample_name}\tSM:{sample_name}\tPL:ILLUMINA" reference.fa {sample_name}\_1.fastq {sample_name}\_2.fastq | samtools sort -@ {threads} > {sample_name}.bam
 samtools index -@ {threads} {sample_name}.bam
-```
+````
 
 where
 'threads' is the number of cores used for aligning
