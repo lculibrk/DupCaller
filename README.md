@@ -27,7 +27,7 @@ pip install .
 
 DupCallerTrim.py is a scripts that can extract 5-prime barcodes from paired-end fastqs. The usage is as follows:
 
-bash````
+bash```
 DupCallerTrim.py -i read1.fq -i2 read2.fq -p barcode_pattern -o sample_name
 ```
 
