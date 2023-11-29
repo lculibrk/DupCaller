@@ -32,10 +32,12 @@ DupCallerTrim.py -i read1.fq -i2 read2.fq -p barcode_pattern -o sample_name
 ```
 
 where
+
 'read1.fq' and 'read2.fq' are fastq files from read1 and read2 of the paired-end sequencing data, respectively. Both unzipped and gzip compressed files can be correctly processed.
+
 'barcode_pattern' is the pattern of barcodes starting from the 5-prime end, with N representing a barcode base and X representing a skipped base. The notation is similar to what has been used in UMI-tools(https://github.com/CGATOxford/UMI-tools). For example, NanoSeq uses 3-base barcode followed by 4 constant bases, so the pattern should be NNNXXXX.
-'sample_name' is the prefix of output paired fastqs. After run complete, '{sample_name}\_1.fastq' and '{sample_name}\_2.fastq' will be generated.
-The barcodes will be recorded in the each read name as {original_read_name}:{read1_barcode}+{read2_barcode}
+
+'sample_name' is the prefix of output paired fastqs. After run complete, '{sample_name}\_1.fastq' and '{sample_name}\_2.fastq' will be generated. The barcodes will be recorded in the each read name as {original_read_name}:{read1_barcode}+{read2_barcode}
 
 If the matched normal is prepared in the same way as the sample, also apply the trimming with the same scheme to the matched normal fastqs. For traditional bulk normal, trimming is not needed.
 
