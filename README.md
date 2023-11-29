@@ -5,14 +5,14 @@
 
 DupCaller is a universal tool for calling somatic mutations and calculating somatic mutational burden from barcoded error-corrected next generation sequencing (ecNGS) data with matched normal (e.x. NanoSeq).
 
-**Prerequisites**
+## Prerequisites
 DupCaller requires python>=3.10 to run. Earlier versions may be sufficient to run DupCaller and have not been tested.
 The complete DupCaller pipeline also requires the following tools for data preprocessing. The versions are used by the developer and other versions may or may not work.
 
 - BWA version 0.7.17 (https://bio-bwa.sourceforge.net)
 - GATK version 4.2.6 (https://github.com/broadinstitute/gatk/releases)
 
-**INSTALLATION**
+## INSTALLATION
 The tool uses pip for installing scripts and prerequisites. To install DupCaller, simply clone this repository and install via pip:
 
 ```bash
@@ -21,9 +21,9 @@ cd DupCaller
 pip install .
 ```
 
-**Pipeline**
+## Pipeline
 
-#### Trim barcodes from reads:
+### Trim barcodes from reads:
 
 DupCallerTrim.py is a scripts that can extract 5-prime barcodes from paired-end fastqs. The usage is as follows:
 
@@ -39,7 +39,7 @@ The barcodes will be recorded in the each read name as {original_read_name}:{rea
 
 If the matched normal is prepared in the same way as the sample, also apply the trimming with the same scheme to the matched normal fastqs. For traditional bulk normal, trimming is not needed.
 
-#### Align trimmed fastqs
+### Align trimmed fastqs
 
 Use a DNA NGS aligner, such as BWA-MEM, to align the trimmed fastqs of both sample and matched normal from the last step. Notice that GATK requires read group ID,SM and PL to be set, so adding those tags during bwa alignment is recommended. For example:
 
@@ -53,7 +53,7 @@ where
 'reference.fa' is the reference genome fasta file
 '{sample_name}\_1.fastq' and '{sample_name}\_2.fastq' are trimmed fastq file from last step.
 
-#### MarkDuplicates with optical duplicates tags and new read name configuration
+### MarkDuplicates with optical duplicates tags and new read name configuration
 
 Run GATK MarkDuplicates on sample and matched-normal bams. Notice that optical duplicates and PCR duplicates should be treated differently in ecNGS variant calling, so the TAGGING*POLICY of GATK MarkDuplicates should be set to OpticalOnly to differentiate optical duplicate from PCR duplicate. Also, since the read name of trimmed fastq is non-traditional, the READ_NAME_REGEX option should also be set to "(?:.*:)?([0-9]+)[^:]_:([0-9]+)[^:]_:([0-9]+)[^:]\_$". The MarkDuplicates commands should be looking like this:
 
@@ -61,7 +61,7 @@ Run GATK MarkDuplicates on sample and matched-normal bams. Notice that optical d
 gatk MarkDuplicates -I sample.bam -O sample.mkdped.bam -M sample.mkdp_metrics.txt --READ_NAME_REGEX "(?:.*:)?([0-9]+)[^:]*:([0-9]+)[^:]*:([0-9]+)[^:]*$" --TAGGING_POLICY OpticalOnly
 ```
 
-#### Variant Calling
+### Variant Calling
 
 After appropriate data preprocessing, DupCallerCall.py should be used to call somatic mutations. The usage depends on your experimental design, and here are some examples.
 
@@ -85,7 +85,7 @@ DupCallerCall.py -b ${sample}.bam -f reference.fa -o {output_predix} -p {threads
 
 Please see "Paramters" section for explanation of all parameters. See "Results" section for descriptions of all result files in the output folder
 
-### Paramteres
+#### Paramteres
 
 **Required**
 
@@ -122,7 +122,7 @@ Please see "Paramters" section for explanation of all parameters. See "Results" 
 | -nad | --maxAltCount | maximum allele count of alt allele in matched-normal | 0 |
 | -mnv | --maxMNVlen | maximum length of MNV for mutation calls | 2 |
 
-### Results
+#### Results
 
 snv.vcf:
 vcf of detected single nucleotide mutations in the sample. The vcf also includes multiple nucleotide mutations (MNVs).
@@ -133,9 +133,9 @@ vcf of detected short insertion/deletion (indel) mutations in the sample.
 snv_burden.txt:
 naive indel burden estimation in sample.
 
-**CITATION**
+## CITATION
 
-**COPYRIGHT**
+## COPYRIGHT
 
 Copyright (c) 2019, Erik Bergstrom [Alexandrov Lab] All rights reserved.
 
@@ -147,4 +147,4 @@ Redistributions in binary form must reproduce the above copyright notice, this l
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-**CONTACT INFORMATION**
+## CONTACT INFORMATION
