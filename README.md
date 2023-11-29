@@ -51,13 +51,16 @@ samtools index -@ {threads} {sample_name}.bam
 ```
 
 where
+
 'threads' is the number of cores used for aligning
+
 'reference.fa' is the reference genome fasta file
+
 '{sample_name}\_1.fastq' and '{sample_name}\_2.fastq' are trimmed fastq file from last step.
 
 ### MarkDuplicates with optical duplicates tags and new read name configuration
 
-Run GATK MarkDuplicates on sample and matched-normal bams. Notice that optical duplicates and PCR duplicates should be treated differently in ecNGS variant calling, so the TAGGING*POLICY of GATK MarkDuplicates should be set to OpticalOnly to differentiate optical duplicate from PCR duplicate. Also, since the read name of trimmed fastq is non-traditional, the READ_NAME_REGEX option should also be set to "(?:.*:)?([0-9]+)[^:]_:([0-9]+)[^:]_:([0-9]+)[^:]\_$". The MarkDuplicates commands should be looking like this:
+Run GATK MarkDuplicates on sample and matched-normal bams. Notice that optical duplicates and PCR duplicates should be treated differently in ecNGS variant calling, so the "TAGGING_POLICY" of GATK MarkDuplicates should be set to OpticalOnly to differentiate optical duplicate from PCR duplicate. Also, since the read name of trimmed fastq is non-traditional, the READ_NAME_REGEX option should also be set to "(?:.*:)?([0-9]+)[^:]_:([0-9]+)[^:]_:([0-9]+)[^:]\_$". The MarkDuplicates commands should be looking like this:
 
 ```bash
 gatk MarkDuplicates -I sample.bam -O sample.mkdped.bam -M sample.mkdp_metrics.txt --READ_NAME_REGEX "(?:.*:)?([0-9]+)[^:]*:([0-9]+)[^:]*:([0-9]+)[^:]*$" --TAGGING_POLICY OpticalOnly
@@ -87,20 +90,24 @@ DupCallerCall.py -b ${sample}.bam -f reference.fa -o {output_predix} -p {threads
 
 Please see "Paramters" section for explanation of all parameters. See "Results" section for descriptions of all result files in the output folder
 
-#### Paramteres
+#### Parameters
 
 **Required**
 
-| These options are required for each run |
+These options are required for each run.
+
 | short option | long option | description |
+| --- | --- | --- |
 | -b | --bam | bam file of ecNGS data |
 | -f | --reference | reference genome fasta file |
 | -o | --output | prefix of the output files |
 
 **Recommended**
 
-| These options should be understood by user and customized accordingly. Some of them involve resources that should be used when available. All resources for GRCh38/hg38 and GRCm39/mm39 are provided at ... and should be used for the matching reference genome. |
+These options should be understood by user and customized accordingly. Some of them involve resources that should be used when available. All resources for GRCh38/hg38 and GRCm39/mm39 are provided at ... and should be used for the matching reference genome. 
+
 | short option | long option | description | default |
+| --- | --- | --- | --- |
 | -r | --regions | contigs to consider for variant calling. The default is set for human. For any other species, please set the contigs accordingly. For example, for mouse, please set to "-r chr{1..19} chrX chrY" | default: chr{1..22} chrX chrY |
 | -g | --germline | indexed germline vcf with AF field. | None |
 | -p | --threads | number of threads | 1 |
@@ -113,8 +120,10 @@ Please see "Paramters" section for explanation of all parameters. See "Results" 
 
 **Advanced**
 
-| These are variant calling paramters and adjustment is unnecessary for general use |
+These are variant calling paramters and adjustment is unnecessary for general use.
+
 | short option | long option | description | default |
+| --- | --- | --- | --- |
 | -aes | --amperrs | prior polymerase substitutionerror rate | 1e-5 |
 | -aei | --amperri | prior polymerase indel error rate | 3e-7 |
 | -mr | --mutRate | prior somatic mutation rate per base | 2.5e-7 |
