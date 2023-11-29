@@ -127,7 +127,7 @@ These are variant calling paramters and adjustment is unnecessary for general us
 | -aes | --amperrs | prior polymerase substitutionerror rate | 1e-5 |
 | -aei | --amperri | prior polymerase indel error rate | 3e-7 |
 | -mr | --mutRate | prior somatic mutation rate per base | 2.5e-7 |
-| -t | --threshold | log10 likelihood ratio threshold of making a mutation call | 2 (100 fold possibility) |
+| -t | --threshold | log10 likelihood ratio threshold of making a mutation call | 2 |
 | -mq | --mapq |minumum mapq for an alignment to be considered | 30 |
 | -d | --minNdepth | minumum coverage in normal for called variants | 10 |
 | -nad | --maxAltCount | maximum allele count of alt allele in matched-normal | 0 |
