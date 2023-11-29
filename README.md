@@ -15,23 +15,24 @@ The complete DupCaller pipeline also requires the following tools for data prepr
 
 - BWA version 0.7.17 (https://bio-bwa.sourceforge.net)
 - GATK version 4.2.6 (https://github.com/broadinstitute/gatk/releases)
-- mosdepth version 0.3.3 (https://github.com/brentp/mosdepth)
   **INSTALLATION**
   The tool uses pip for installing scripts and prerequisites. To install DupCaller, simply clone this repository and install via pip:
-  '''bash
+  bash
   git clone https://github.com/AlexandrovLab/DupCaller.git
   cd DupCaller
   pip install .
-  '''
+
+```
 
 **Pipeline**
 
 #### Trim barcodes from reads:
 
 DupCallerTrim.py is a scripts that can extract 5-prime barcodes from paired-end fastqs. The usage is as follows:
-'''bash
+bash
 DupCallerTrim.py -i read1.fq -i2 read2.fq -p barcode_pattern -o sample_name
-'''
+```
+
 where
 'read1.fq' and 'read2.fq' are fastq files from read1 and read2 of the paired-end sequencing data, respectively. Both unzipped and gzip compressed files can be correctly processed.
 'barcode_pattern' is the pattern of barcodes starting from the 5-prime end, with N representing a barcode base and X representing a skipped base. The notation is similar to what has been used in UMI-tools(https://github.com/CGATOxford/UMI-tools). For example, NanoSeq uses 3-base barcode followed by 4 constant bases, so the pattern should be NNNXXXX.
@@ -43,10 +44,12 @@ If the matched normal is prepared in the same way as the sample, also apply the 
 #### Align trimmed fastqs
 
 Use a DNA NGS aligner, such as BWA-MEM, to align the trimmed fastqs of both sample and matched normal from the last step. Notice that GATK requires read group ID,SM and PL to be set, so adding those tags during bwa alignment is recommended. For example:
-'''bash
+
+```bash
 bwa mem -t {threads} -R "@RG\tID:{sample_name}\tSM:{sample_name}\tPL:ILLUMINA" reference.fa {sample_name}\_1.fastq {sample_name}\_2.fastq | samtools sort -@ {threads} > {sample_name}.bam
 samtools index -@ {threads} {sample_name}.bam
-'''
+```
+
 where
 'threads' is the number of cores used for aligning
 'reference.fa' is the reference genome fasta file
@@ -55,41 +58,48 @@ where
 #### MarkDuplicates with optical duplicates tags and new read name configuration
 
 Run GATK MarkDuplicates on sample and matched-normal bams. Notice that optical duplicates and PCR duplicates should be treated differently in ecNGS variant calling, so the TAGGING*POLICY of GATK MarkDuplicates should be set to OpticalOnly to differentiate optical duplicate from PCR duplicate. Also, since the read name of trimmed fastq is non-traditional, the READ_NAME_REGEX option should also be set to "(?:.*:)?([0-9]+)[^:]_:([0-9]+)[^:]_:([0-9]+)[^:]\_$". The MarkDuplicates commands should be looking like this:
-'''bash
+
+```bash
 gatk MarkDuplicates -I sample.bam -O sample.mkdped.bam -M sample.mkdp_metrics.txt --READ_NAME_REGEX "(?:.*:)?([0-9]+)[^:]*:([0-9]+)[^:]*:([0-9]+)[^:]*$" --TAGGING_POLICY OpticalOnly
-'''
+```
 
 #### Variant Calling
 
 After appropriate data preprocessing, DupCallerCall.py should be used to call somatic mutations. The usage depends on your experimental design, and here are some examples.
 
 1. Whole genome/ whole exome / reduced genome (e.x. NanoSeq) with a matched normal
-   '''bash
-   DupCallerCall.py -b ${sample}.bam -f reference.fa -o {output_predix} -p {threads} -n {normal.bam} -g germline.vcf.gz -m noise_mask.bed.gz
-   '''
+
+```bash
+DupCallerCall.py -b ${sample}.bam -f reference.fa -o {output_predix} -p {threads} -n {normal.bam} -g germline.vcf.gz -m noise_mask.bed.gz
+```
+
 2. Mutagenesis panel without a matched normal
-   '''bash
-   DupCallerCall.py -b ${sample}.bam -f reference.fa -o {output_predix} -p {threads} -g germline.vcf.gz -m noise_mask.bed.gz -ma 0.3
-   '''
+
+```bash
+DupCallerCall.py -b ${sample}.bam -f reference.fa -o {output_predix} -p {threads} -g germline.vcf.gz -m noise_mask.bed.gz -ma 0.3
+```
+
 3. Deep sequencing of very small gene panels (e.x. less than 5 genes)
-   '''bash
-   DupCallerCall.py -b ${sample}.bam -f reference.fa -o {output_predix} -p {threads} -n {normal.bam} -g germline.vcf.gz -m noise_mask.bed.gz -x True
-   '''
-   Please see "Paramters" section for explanation of all parameters. See "Results" section for descriptions of all result files in the output folder
+
+```bash
+DupCallerCall.py -b ${sample}.bam -f reference.fa -o {output_predix} -p {threads} -n {normal.bam} -g germline.vcf.gz -m noise_mask.bed.gz -x True
+```
+
+Please see "Paramters" section for explanation of all parameters. See "Results" section for descriptions of all result files in the output folder
 
 ### Paramteres
 
-## Required:
+**Required**
 
-These options are required to set for each run
+| These options are required for each run |
 | short option | long option | description |
 | -b | --bam | bam file of ecNGS data |
 | -f | --reference | reference genome fasta file |
 | -o | --output | prefix of the output files |
 
-## Recommended
+**Recommended**
 
-These options should be understood by user and customized accordingly. Some of them involve resources that should be used when available. All resources for GRCh38/hg38 and GRCm39/mm39 are provided at ... and should be used for the matching reference genome.
+| These options should be understood by user and customized accordingly. Some of them involve resources that should be used when available. All resources for GRCh38/hg38 and GRCm39/mm39 are provided at ... and should be used for the matching reference genome. |
 | short option | long option | description | default |
 | -r | --regions | contigs to consider for variant calling. The default is set for human. For any other species, please set the contigs accordingly. For example, for mouse, please set to "-r chr{1..19} chrX chrY" | default: chr{1..22} chrX chrY |
 | -g | --germline | indexed germline vcf with AF field. | None |
@@ -101,9 +111,9 @@ These options should be understood by user and customized accordingly. Some of t
 | -tr | --trimR | ignore mutation if it is less than n bps from ends of read | 15 |
 | -x | --panel | True or False. Enable panel region splitting. Recommended for small panels | False |
 
-## Advanced
+**Advanced**
 
-These are variant calling paramters and adjustment is unnecessary for general use
+| These are variant calling paramters and adjustment is unnecessary for general use |
 | short option | long option | description | default |
 | -aes | --amperrs | prior polymerase substitutionerror rate | 1e-5 |
 | -aei | --amperri | prior polymerase indel error rate | 3e-7 |
