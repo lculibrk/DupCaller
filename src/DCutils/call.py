@@ -13,7 +13,8 @@ from pysam import VariantFile as VCF
 from DCutils.funcs import *
 
 
-def bamIterateMultipleRegion(bamObject, regions):
+def bamIterateMultipleRegion(bam, regions):
+    bamObject = BAM(bam, "rb")
     for region in regions:
         for rec in bamObject.fetch(*region):
             if len(region) >= 2:
@@ -91,8 +92,8 @@ def callBam(params, processNo, chunkSize):
         regions_end = regions[-1][0] + ":" + str(regions[-1][2])
 
     print(f"Process {str(processNo)}: Initiated. Regions:{region_start}-{regions_end}")
-
-    for rec, region in bamIterateMultipleRegion(tumorBam, regions):
+    # for region in regions:
+    for rec, region in bamIterateMultipleRegion(bam, regions):
         recCount += 1
         if recCount == currentCheckPoint:
             currentTime = (time.time() - starttime) / 60
@@ -103,6 +104,8 @@ def callBam(params, processNo, chunkSize):
             )
 
             currentCheckPoint += 1000000
+        # if rec.query_name.endswith("CCC+TGA") or rec.query_name.endswith("TGA+CCC"):
+        # print(rec)
         if (
             rec.is_supplementary
             or rec.is_secondary
@@ -111,6 +114,8 @@ def callBam(params, processNo, chunkSize):
             or rec.is_qcfail
         ):
             continue
+        # if rec.query_name.endswith("CCC+TGA") or rec.query_name.endswith("TGA+CCC"):
+        # print(1)
         # if rec.get_tag("AS") - rec.get_tag("XS") <= 50:
         # continue
         pass_read_num += 1
@@ -266,6 +271,7 @@ def callBam(params, processNo, chunkSize):
                             germline,
                             noise,
                             normalBam,
+                            tumorBam,
                             params,
                         )
                         coverage = np.zeros(100000, dtype=int)
@@ -488,8 +494,10 @@ def callBam(params, processNo, chunkSize):
                         ref_int = ref_np[start_ind:end_ind]
                         refs_ind = np.nonzero(
                             np.logical_and(
-                                F1R2_ARLR <= -params["pcutoff"],
-                                F2R1_ARLR <= -params["pcutoff"],
+                                F1R2_ARLR
+                                <= -params["pcutoff"] + 2 * log10(params["mutRate"]),
+                                F2R1_ARLR
+                                <= -params["pcutoff"] + 2 * log10(params["mutRate"]),
                             )
                         )[0].tolist()
                         muts_ind = np.nonzero(
@@ -537,8 +545,8 @@ def callBam(params, processNo, chunkSize):
                             ta, tr, tdp = extractDepthSnv(
                                 tumorBam, mut_chrom, mut_pos, mut_ref, mut_alt, params
                             )
-                            if ta + tr != tdp:
-                                continue
+                            # if ta + tr != tdp:
+                            # continue
                             if ta == 0:
                                 continue
                             """
@@ -651,7 +659,6 @@ def callBam(params, processNo, chunkSize):
             else:
                 currentReadDict[bc1 + "+" + bc2]["F2R1"] += 1
             currentStart = start
-
     """
     Calling block starts
     """
@@ -724,6 +731,7 @@ def callBam(params, processNo, chunkSize):
                     germline,
                     noise,
                     normalBam,
+                    tumorBam,
                     params,
                 )
                 coverage = np.zeros(100000, dtype=int)
@@ -933,8 +941,8 @@ def callBam(params, processNo, chunkSize):
                 ref_int = ref_np[start_ind:end_ind]
                 refs_ind = np.nonzero(
                     np.logical_and(
-                        F1R2_ARLR <= -params["pcutoff"],
-                        F2R1_ARLR <= -params["pcutoff"],
+                        F1R2_ARLR <= -params["pcutoff"] + 2 * log10(params["mutRate"]),
+                        F2R1_ARLR <= -params["pcutoff"] + 2 * log10(params["mutRate"]),
                     )
                 )[0].tolist()
                 muts_ind = np.nonzero(
@@ -981,8 +989,8 @@ def callBam(params, processNo, chunkSize):
                     ta, tr, tdp = extractDepthSnv(
                         tumorBam, mut_chrom, mut_pos, mut_ref, mut_alt, params
                     )
-                    if ta + tr != tdp:
-                        continue
+                    # if ta + tr != tdp:
+                    # continue
                     if ta == 0:
                         continue
                     """

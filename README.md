@@ -88,7 +88,7 @@ DupCallerCall.py -b ${sample}.bam -f reference.fa -o {output_predix} -p {threads
 DupCallerCall.py -b ${sample}.bam -f reference.fa -o {output_predix} -p {threads} -n {normal.bam} -g germline.vcf.gz -m noise_mask.bed.gz -x True
 ```
 
-Please see "Paramters" section for explanation of all parameters. See "Results" section for descriptions of all result files in the output folder
+Please see "Parameters" section for explanation of all parameters. See "Results" section for descriptions of all result files in the output folder
 
 #### Parameters
 
@@ -120,7 +120,7 @@ These options should be understood by user and customized accordingly. Some of t
 
 **Advanced**
 
-These are variant calling paramters and adjustment is unnecessary for general use.
+These are variant calling parameters and adjustment is unnecessary for general use.
 
 | short option | long option | description | default |
 | --- | --- | --- | --- |
@@ -137,10 +137,13 @@ These are variant calling paramters and adjustment is unnecessary for general us
 
 snv.vcf:
 vcf of detected single nucleotide mutations in the sample. The vcf also includes multiple nucleotide mutations (MNVs).
+
 snv_burden.txt:
 naive burden and least-square snv burden estimation of the samples with 95% confidence interval. Information for least-square burden can be found at...
+
 indel.vcf:
 vcf of detected short insertion/deletion (indel) mutations in the sample.
+
 snv_burden.txt:
 naive indel burden estimation in sample.
 

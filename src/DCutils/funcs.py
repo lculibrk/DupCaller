@@ -33,7 +33,6 @@ def splitBamRegions(bam, num, contigs, fast=True):
             currentTid = bamObject.get_tid(contig)
             contigCountsAll[currentTid] = contigCounts[nn]
         contigCountsTuple = tuple(contigCountsAll)
-        print(contigCounts)
         contigLengths = [
             bamObject.get_reference_length(contig) for contig in bamObject.references
         ]
@@ -441,7 +440,7 @@ def calculatePosterior(Pamp, Pref, Palt, prior_ref, prior_alt):
 
 
 def prepare_reference_mats(
-    chrom, start, end, reference_seq, germline_bed, noise_bed, nbam, params
+    chrom, start, end, reference_seq, germline_bed, noise_bed, nbam, tbam, params
 ):
     ### Define and Initialize
     af_miss = params["mutRate"]
@@ -468,8 +467,8 @@ def prepare_reference_mats(
             if len(ref) == 1:
                 for ii, alt in enumerate(rec.alts):
                     if len(alt) == 1:
-                        prior_mat[ind, base2num[alt]] = afs[ii]
-                        has_snp = True
+                        # prior_mat[ind, base2num[alt]] = afs[ii]
+                        # has_snp = True
                         if afs[ii] >= 0.001:
                             snp_mask[ind] = True
                     elif afs[ii] >= 0.001:
@@ -502,6 +501,11 @@ def prepare_reference_mats(
     if nbam:
         depth = extractDepthRegion(nbam, chrom, start, end, params)
         n_cov_mask = depth < params["minNdepth"]
+    else:
+        depth = extractDepthRegion(tbam, chrom, start, end, params)
+        ma = params["maxAF"]
+        min_depth = math.ceil(1 / ma)
+        n_cov_mask = depth < min_depth
     return prior_mat, snp_mask, indel_mask, noise_mask, n_cov_mask, reference_int
 
 

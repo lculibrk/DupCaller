@@ -487,24 +487,32 @@ if __name__ == "__main__":
     plt.savefig(
         params["output"] + "/" + args.output + "_burden_by_duplex_group_size.png"
     )
-
-    FPs_count = [0 for _ in range(max(FPAll + RPAll))]
-    RPs_count = [0 for _ in range(max(FPAll + RPAll))]
-    for nn in range(max(FPAll + RPAll)):
-        FPs_count[nn] = FPAll.count(nn + 1)
-        RPs_count[nn] = RPAll.count(nn + 1)
-    with open(
-        params["output"] + "/" + args.output + "_DBS_end_profile_call.txt", "w"
-    ) as f:
-        f.write("Distance\tMutations_fragment_end\tMutations_read_end\n")
+    if len(FPAll + RPAll) != 0:
+        FPs_count = [0 for _ in range(max(FPAll + RPAll))]
+        RPs_count = [0 for _ in range(max(FPAll + RPAll))]
         for nn in range(max(FPAll + RPAll)):
-            f.write(f"{nn+1}\t{FPs_count[nn]}\t{RPs_count[nn]}\n")
-    plt.figure()
-    plt.hist(FPAll, bins=range(0, max(FPAll)))
-    plt.savefig(params["output"] + "/" + args.output + "_fragment_end_distance.png")
-    plt.figure()
-    plt.hist(RPAll, bins=range(0, max(RPAll)))
-    plt.savefig(params["output"] + "/" + args.output + "_read_end_distance.png")
+            FPs_count[nn] = FPAll.count(nn + 1)
+            RPs_count[nn] = RPAll.count(nn + 1)
+        with open(
+            params["output"] + "/" + args.output + "_SBS_end_profile_call.txt", "w"
+        ) as f:
+            f.write("Distance\tMutations_fragment_end\tMutations_read_end\n")
+            for nn in range(max(FPAll + RPAll)):
+                f.write(f"{nn+1}\t{FPs_count[nn]}\t{RPs_count[nn]}\n")
+        plt.figure()
+        plt.hist(FPAll, bins=range(0, max(FPAll)))
+        plt.savefig(params["output"] + "/" + args.output + "_fragment_end_distance.png")
+        plt.figure()
+        plt.hist(RPAll, bins=range(0, max(RPAll)))
+        plt.savefig(params["output"] + "/" + args.output + "_read_end_distance.png")
+        ACs = [_["samples"][0][0] > 1 for _ in mutsAll]
+        plt.figure()
+        plt.hist(ACs, bins=range(0, max(ACs)))
+        plt.savefig(params["output"] + "/" + args.output + "_alt_read_count.png")
+        ACs_clonal = [_ for _ in ACs if _ > 1]
+        clonal_num = len(ACs_clonal)
+    else:
+        print(f"No mutations detected.")
 
     with open(params["output"] + "/" + args.output + "_stats.txt", "w") as f:
         f.write(f"Number of Unique Reads\t{unique_read_num}\n")
@@ -520,6 +528,7 @@ if __name__ == "__main__":
 
     with open(params["output"] + "/" + args.output + "_snv_burden.txt", "w") as f:
         f.write(f"Number of Mutations\t{muts_num}\n")
+        f.write(f"Number of multi-clonal Mutations\t{clonal_num}\n")
         f.write(f"Estimated Naive Burden\t{burden_naive}\n")
         f.write(f"Estimated Least-square Burden\t{burden_lstsq}\n")
         f.write(f"Least-square Burden Upper 95% CI\t{burden_lstsq_uci}\n")
