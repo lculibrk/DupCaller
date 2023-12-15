@@ -12,5 +12,6 @@ setup(
         "DupCaller/DupCallerTrim.py",
         "DupCaller/DupCallerSummarize.py",
     ],
+    packages=["src/DCutils"],
     install_requires=["biopython>=1.78", "pysam>=0.19.0", "numpy>=1.21.5"],
 )
