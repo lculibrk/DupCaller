@@ -39,7 +39,10 @@ def callBam(params, processNo, chunkSize):
     isLearn = params.get("isLearn", False)
     nn = processNo
     output = "tmp/" + params["output"] + "_" + str(nn)
-    noise = BED(params["noise"])
+    if params["noise"]:
+        noise = BED(params["noise"])
+    else:
+        noise = None
     base2num = {"A": 0, "T": 1, "C": 2, "G": 3}
     num2base = "ATCG"
     muts = []
@@ -229,8 +232,8 @@ def callBam(params, processNo, chunkSize):
                                         "\t".join(
                                             [
                                                 reference_mat_chrom,
-                                                str(pos),
-                                                str(pos + 1),
+                                                str(pos + reference_mat_start),
+                                                str(pos + 1 + reference_mat_start),
                                                 str(coverage[pos]),
                                                 str(coverage_indel[pos]),
                                             ]
@@ -693,8 +696,8 @@ def callBam(params, processNo, chunkSize):
                                 "\t".join(
                                     [
                                         reference_mat_chrom,
-                                        str(pos),
-                                        str(pos + 1),
+                                        str(pos + reference_mat_start),
+                                        str(pos + 1 + reference_mat_start),
                                         str(coverage[pos]),
                                         str(coverage_indel[pos]),
                                     ]

@@ -33,10 +33,10 @@ if __name__ == "__main__":
             with open(snv_burden_file) as stats:
                 lines = stats.readlines()
                 snv_num = int(lines[0].strip("\n").split("\t")[1])
-                naive_burden = float(lines[1].strip("\n").split("\t")[1])
-                lsq_burden = float(lines[2].strip("\n").split("\t")[1])
-                uci = float(lines[3].strip("\n").split("\t")[1])
-                lci = float(lines[4].strip("\n").split("\t")[1])
+                naive_burden = float(lines[2].strip("\n").split("\t")[1])
+                lsq_burden = float(lines[3].strip("\n").split("\t")[1])
+                uci = float(lines[4].strip("\n").split("\t")[1])
+                lci = float(lines[5].strip("\n").split("\t")[1])
             with open(indel_burden_file) as stats:
                 lines = stats.readlines()
                 indel_num = int(lines[0].strip("\n").split("\t")[1])

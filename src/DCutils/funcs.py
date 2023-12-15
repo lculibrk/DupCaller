@@ -490,12 +490,13 @@ def prepare_reference_mats(
                     if afs[ii] >= 0.001:
                         indel_mask[max(ind, 0) : ind + len(alt)] = True
     ### Preparep noise mask
-    for rec in noise_bed.fetch(chrom, start, end, parser=pysam.asBed()):
-        interval_start = max(rec.start, start)
-        interval_end = min(rec.end, end)
-        interval_len = interval_end - interval_start
-        interval_start_ind = interval_start - start
-        noise_mask[interval_start_ind : interval_start_ind + interval_len] = True
+    if noise_bed != None:
+        for rec in noise_bed.fetch(chrom, start, end, parser=pysam.asBed()):
+            interval_start = max(rec.start, start)
+            interval_end = min(rec.end, end)
+            interval_len = interval_end - interval_start
+            interval_start_ind = interval_start - start
+            noise_mask[interval_start_ind : interval_start_ind + interval_len] = True
 
     ### Preparep normal coverage mask
     if nbam:

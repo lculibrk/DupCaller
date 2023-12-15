@@ -10,7 +10,7 @@ setup(
     scripts=[
         "DupCaller/DupCallerCall.py",
         "DupCaller/DupCallerTrim.py",
-        "DupCaller/DupCallerLearn.py",
+        "DupCaller/DupCallerSummarize.py",
     ],
     install_requires=["biopython>=1.78", "pysam>=0.19.0", "numpy>=1.21.5"],
 )

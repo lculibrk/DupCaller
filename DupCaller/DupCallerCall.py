@@ -4,6 +4,10 @@ import os
 import time
 from collections import OrderedDict
 from multiprocessing import Pool
+import subprocess
+import shutil
+from gzip import open as gzopen
+
 
 import matplotlib.patches as mpatches
 import numpy as np
@@ -385,6 +389,18 @@ if __name__ == "__main__":
         FPAll = sum(FPs, [])
         RPAll = sum(RPs, [])
 
+        coverage_beds = [
+            f"tmp/{args.output}_{_}_coverage.bed.gz" for _ in range(args.threads)
+        ]
+        coverage_bed = f"{args.output}/{args.output}_coverage.bed.gz"
+
+        with gzopen(coverage_bed, "w") as outfile:
+            for bed_file in coverage_beds:
+                with gzopen(bed_file, "r") as infile:
+                    shutil.copyfileobj(infile, outfile)
+        subprocess.run(["rm"] + coverage_beds)
+        # subprocess.run(["tabix",coverage_bed])
+
     tBam = BAM(args.bam, "rb")
     contigs = tBam.references
     # print(contigs)
@@ -513,6 +529,7 @@ if __name__ == "__main__":
         clonal_num = len(ACs_clonal)
     else:
         print(f"No mutations detected.")
+        clonal_num = 0
 
     with open(params["output"] + "/" + args.output + "_stats.txt", "w") as f:
         f.write(f"Number of Unique Reads\t{unique_read_num}\n")
@@ -522,7 +539,7 @@ if __name__ == "__main__":
         f.write(f"Per Read Family Coverage \t{coverage/duplex_num}\n")
         f.write(
             f"Pass-filter Duplication Rate\t\
-        {unique_read_num/pass_read_num}\n"
+        {1-unique_read_num/pass_read_num}\n"
         )
         f.write(f"Efficiency\t{efficiency}\n")
 
