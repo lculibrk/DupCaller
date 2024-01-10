@@ -2,13 +2,14 @@
 
 import gzip
 
-# from pysam import FastaFile as FASTA
+from pysam import FastaFile as FASTA
 import time
 
 import numpy as np
 from pysam import AlignmentFile as BAM
 from pysam import TabixFile as BED
 from pysam import VariantFile as VCF
+from Bio import SeqIO
 
 from DCutils.funcs import *
 
@@ -32,7 +33,14 @@ def callBam(params, processNo, chunkSize):
         germline = VCF(params["germline"], "rb")
     else:
         germline = None
-    reference = params["reference"]
+    all_chroms = [_[0] for _ in regions]
+    # fasta = dict()
+    # fasta = SeqIO.index(params["reference"], "fasta")
+    fasta = FASTA(params["reference"])
+    start_time = time.time()
+    ##for ch in all_chroms:
+    # fasta[ch] = whole_fasta[ch]
+    # Add this record to our list
     minMapq = params["mapq"]
     mutRate = params["mutRate"]
     pcut = params["pcutoff"]
@@ -43,6 +51,10 @@ def callBam(params, processNo, chunkSize):
         noise = BED(params["noise"])
     else:
         noise = None
+    if params["indel_bed"]:
+        indel_bed = BED(params["indel_bed"])
+    else:
+        indel_bed = None
     base2num = {"A": 0, "T": 1, "C": 2, "G": 3}
     num2base = "ATCG"
     muts = []
@@ -74,7 +86,7 @@ def callBam(params, processNo, chunkSize):
     currentStart = -1
     currentReadDict = {}
     # chromPast = 'startChrom'
-    fasta = reference
+    # fasta = reference
     recCount = 0
     currentCheckPoint = 1000000
     lastTime = 0
@@ -243,7 +255,9 @@ def callBam(params, processNo, chunkSize):
                                 )
                             total_coverage += np.sum(coverage)
                             total_coverage_indel += np.sum(coverage_indel)
+                        # if chromNow != reference_mat_chrom:
                         reference_mat_chrom = chromNow
+                        # current_reference = str(fasta[reference_mat_chrom].seq)
                         reference_mat_start = readSet[0].reference_start
                         try:
                             region_end = region[2]
@@ -257,6 +271,9 @@ def callBam(params, processNo, chunkSize):
                             ),
                             contig_end,
                         )
+                        current_fasta = fasta.fetch(
+                            reference_mat_chrom, reference_mat_start, reference_mat_end
+                        )
                         (
                             prior_mat,
                             snp_mask,
@@ -268,11 +285,10 @@ def callBam(params, processNo, chunkSize):
                             reference_mat_chrom,
                             reference_mat_start,
                             reference_mat_end,
-                            fasta[reference_mat_chrom][
-                                reference_mat_start:reference_mat_end
-                            ],
+                            current_fasta,
                             germline,
                             noise,
+                            indel_bed,
                             normalBam,
                             tumorBam,
                             params,
@@ -357,15 +373,27 @@ def callBam(params, processNo, chunkSize):
                             indel_chrom = chromNow
                             indel_pos = int(indel.split(":")[0])
                             indel_size = int(indel.split(":")[1])
+                            NMs = [seq.get_tag("NM") for seq in readSet]
+                            averageNM = sum(NMs) / len(NMs)
+                            if averageNM - abs(indel_size) > 1:
+                                continue
                             if indel_size < 0:
                                 indel_ref = str(
-                                    fasta[indel_chrom][
-                                        indel_pos : indel_pos - indel_size + 1
-                                    ].seq
+                                    current_fasta[
+                                        indel_pos
+                                        - reference_mat_start : indel_pos
+                                        - reference_mat_start
+                                        - indel_size
+                                        + 1
+                                    ]
                                 ).upper()
-                                indel_alt = fasta[indel_chrom][indel_pos].upper()
+                                indel_alt = current_fasta[
+                                    indel_pos - reference_mat_start
+                                ].upper()
                             else:
-                                indel_ref = fasta[indel_chrom][indel_pos].upper()
+                                indel_ref = current_fasta[
+                                    indel_pos - reference_mat_start
+                                ].upper()
                                 indel_alt = indel_ref + indel.split(":")[2]
                             indel_str = (
                                 str(indel_chrom)
@@ -377,6 +405,7 @@ def callBam(params, processNo, chunkSize):
                             )
                             # if indel_dict.get(indel_str):
                             # continue
+                            """
                             ta, tr, tdp = extractDepthIndel(
                                 tumorBam,
                                 indel_chrom,
@@ -389,28 +418,11 @@ def callBam(params, processNo, chunkSize):
                                 continue
                             if ta == 0:
                                 continue
-                            """
-                            if ta > 1:
-                                germline_flag = False
-                                if germline:
-                                    for var in germline.fetch(
-                                        indel_chrom, indel_pos, indel_pos + 1
-                                    ):
-                                        for alt in var.alts:
-                                            offset = min(len(alt), len(var.ref)) - 1
-                                            pos_norm = var.pos + offset
-                                            ref_norm = var.ref[offset:]
-                                            alt_norm = alt[offset:]
-                                            if (
-                                                pos_norm == indel_pos + 1
-                                                and ref_norm == var.ref
-                                                and alt_norm == alt
-                                            ):
-                                                germline_flag = True
-                                                break
-                                if germline_flag:
-                                    continue
-                            """
+                            if ta > params["maxAltCount"]:
+                                continue
+                            if IndelFilterByWindows(tumorBam,indel_chrom,indel_pos+1,5,params):
+                                continue
+
                             if normalBam:
                                 na, nr, ndp = extractDepthIndel(
                                     normalBam,
@@ -420,14 +432,17 @@ def callBam(params, processNo, chunkSize):
                                     indel_alt,
                                     params,
                                 )
-                                if ndp - nr > params["maxAltCount"]:
+                                if ndp - nr > 0:
                                     continue
                                 if ndp < params["minNdepth"]:
                                     continue
+                                if IndelFilterByWindows(normalBam,indel_chrom,indel_pos+1,5,params):
+                                    continue
                             else:
                                 na, nr, ndp = (0, 0, 0)
-                            if ta / tdp > params["maxAF"]:
-                                continue
+                                if ta / tdp > params["maxAF"]:
+                                    continue
+                            """
                             indel_rec = {
                                 "chrom": chromNow,
                                 "pos": indel_pos + 1,
@@ -436,11 +451,11 @@ def callBam(params, processNo, chunkSize):
                                 "infos": {
                                     "F1R2": int(
                                         F1R2_alt_count[pass_inds[0]]
-                                        + F1R2_alt_count[pass_inds[0]]
+                                        + F1R2_ref_count[pass_inds[0]]
                                     ),
                                     "F2R1": int(
                                         F2R1_alt_count[pass_inds[0]]
-                                        + F2R1_alt_count[pass_inds[0]]
+                                        + F2R1_ref_count[pass_inds[0]]
                                     ),
                                     "TG": F1R2_ARLR[pass_inds[0]],
                                     "BG": F2R1_ARLR[pass_inds[0]],
@@ -458,7 +473,7 @@ def callBam(params, processNo, chunkSize):
                                     ),
                                 },
                                 "formats": ["AC", "RC", "DP"],
-                                "samples": [[ta, tr, tdp], [na, nr, ndp]],
+                                # "samples": [[ta, tr, tdp], [na, nr, ndp]],
                             }
                             muts_indels.append(indel_rec)
                             indel_dict[indel_str] = 1
@@ -541,6 +556,7 @@ def callBam(params, processNo, chunkSize):
                             mut_pos = mut_positions[nn]
                             mut_ref = num2base[ref_int[muts_ind[nn]]]
                             mut_alt = num2base[alt_int[muts_ind[nn]]]
+                            """
                             # if muts_dict.get(
                             # "_".join([mut_chrom, str(mut_pos), mut_ref, mut_alt])
                             # ):
@@ -552,23 +568,8 @@ def callBam(params, processNo, chunkSize):
                             # continue
                             if ta == 0:
                                 continue
-                            """
-                            if ta > 1:
-                                germline_flag = False
-                                if germline:
-                                    for var in germline.fetch(
-                                        mut_chrom, mut_pos - 1, mut_pos
-                                    ):
-                                        if (
-                                            len(var.ref) == 1
-                                            and var.ref == mut_ref
-                                            and var.alts[0] == mut_alt
-                                        ):
-                                            germline_flag = True
-                                            break
-                                if germline_flag:
-                                    continue
-                            """
+                            if ta > params["maxAltCount"]:
+                                continue
                             if normalBam:
                                 na, nr, ndp = extractDepthSnv(
                                     normalBam,
@@ -578,16 +579,17 @@ def callBam(params, processNo, chunkSize):
                                     mut_alt,
                                     params,
                                 )
-                                if na > params["maxAltCount"]:
+                                if na > 0:
                                     continue
                                 if ndp < params["minNdepth"]:
                                     continue
                             else:
                                 na, nr, ndp = (0, 0, 0)
-                            if ta / tdp > params["maxAF"]:
-                                continue
-
-                            if readSet[0].is_forward:
+                                if ta / tdp > params["maxAF"]:
+                                    continue
+                            
+                            """
+                            if readSet[0].template_length > 0:
                                 readPos5p = min(
                                     muts_ind[nn] + 1,
                                     abs(readSet[0].template_length) - muts_ind[nn],
@@ -637,7 +639,7 @@ def callBam(params, processNo, chunkSize):
                                     ),
                                 },
                                 "formats": ["AC", "RC", "DP"],
-                                "samples": [[ta, tr, tdp], [na, nr, ndp]],
+                                # "samples": [[ta, tr, tdp], [na, nr, ndp]],
                             }
                             muts_dict[
                                 "_".join([mut_chrom, str(mut_pos), mut_ref, mut_alt])
@@ -683,7 +685,8 @@ def callBam(params, processNo, chunkSize):
         duplex_no = f"{min([F1R2,F2R1])}+{max([F1R2,F2R1])}"
         if duplex_read_num_dict.get(duplex_no) is None:
             duplex_read_num_dict[duplex_no] = [0, 0]
-        if setBc1 != setBc2 and F2R1 > 1 and F1R2 > 1:
+        unique_read_num += 1
+        if setBc1 != setBc2 and F2R1 >= 1 and F1R2 >= 1:
             rs_reference_end = max([r.reference_end for r in readSet])
             chromNow = readSet[0].reference_name
             if chromNow != reference_mat_chrom or rs_reference_end >= reference_mat_end:
@@ -707,7 +710,9 @@ def callBam(params, processNo, chunkSize):
                         )
                     total_coverage += np.sum(coverage)
                     total_coverage_indel += np.sum(coverage_indel)
+                # if chromNow != reference_mat_chrom:
                 reference_mat_chrom = chromNow
+                # current_reference = str(fasta[reference_mat_chrom].seq)
                 reference_mat_start = readSet[0].reference_start
                 try:
                     region_end = region[2]
@@ -718,6 +723,9 @@ def callBam(params, processNo, chunkSize):
                     readSet[0].reference_start + 100000,
                     max(region_end, max([seq.reference_end for seq in readSet])),
                     contig_end,
+                )
+                current_fasta = fasta.fetch(
+                    reference_mat_chrom, reference_mat_start, reference_mat_end
                 )
                 (
                     prior_mat,
@@ -730,15 +738,17 @@ def callBam(params, processNo, chunkSize):
                     reference_mat_chrom,
                     reference_mat_start,
                     reference_mat_end,
-                    fasta[reference_mat_chrom][reference_mat_start:reference_mat_end],
+                    current_fasta,
                     germline,
                     noise,
+                    indel_bed,
                     normalBam,
                     tumorBam,
                     params,
                 )
                 coverage = np.zeros(100000, dtype=int)
                 coverage_indel = np.zeros(100000, dtype=int)
+
             ### Record read names to check if mate has been processed
             processed_flag = 0
             for seq in readSet:
@@ -777,7 +787,7 @@ def callBam(params, processNo, chunkSize):
             ]
             if any(indel_bool):
                 masks_indel = np.zeros([4, end_ind_max - start_ind], dtype=bool)
-                masks_indel[0, :] = snp_mask[start_ind:end_ind_max]
+                masks_indel[0, :] = indel_mask[start_ind:end_ind_max]
                 masks_indel[1, :] = noise_mask[start_ind:end_ind_max]
                 masks_indel[2, :] = n_cov_mask[start_ind:end_ind_max]
                 left, right = determineTrimLength(
@@ -796,7 +806,8 @@ def callBam(params, processNo, chunkSize):
                     F2R1_alt_count,
                 ) = genotypeDSIndel(readSet, tumorBam, antimask_indel, params)
                 DCS = np.logical_and(
-                    F1R2_ARLR >= params["pcutoff"], F2R1_ARLR >= params["pcutoff"]
+                    F1R2_ARLR >= params["pcutoff"],
+                    F2R1_ARLR >= params["pcutoff"],
                 )
                 pass_inds = np.nonzero(DCS)[0].tolist()
                 indels_pass = [indels[_] for _ in pass_inds]
@@ -806,15 +817,27 @@ def callBam(params, processNo, chunkSize):
                     indel_chrom = chromNow
                     indel_pos = int(indel.split(":")[0])
                     indel_size = int(indel.split(":")[1])
+                    NMs = [seq.get_tag("NM") for seq in readSet]
+                    averageNM = sum(NMs) / len(NMs)
+                    if averageNM - abs(indel_size) > 1:
+                        continue
                     if indel_size < 0:
                         indel_ref = str(
-                            fasta[indel_chrom][
-                                indel_pos : indel_pos - indel_size + 1
-                            ].seq
+                            current_fasta[
+                                indel_pos
+                                - reference_mat_start : indel_pos
+                                - reference_mat_start
+                                - indel_size
+                                + 1
+                            ]
                         ).upper()
-                        indel_alt = fasta[indel_chrom][indel_pos].upper()
+                        indel_alt = current_fasta[
+                            indel_pos - reference_mat_start
+                        ].upper()
                     else:
-                        indel_ref = fasta[indel_chrom][indel_pos].upper()
+                        indel_ref = current_fasta[
+                            indel_pos - reference_mat_start
+                        ].upper()
                         indel_alt = indel_ref + indel.split(":")[2]
                     indel_str = (
                         str(indel_chrom)
@@ -826,6 +849,7 @@ def callBam(params, processNo, chunkSize):
                     )
                     # if indel_dict.get(indel_str):
                     # continue
+                    """
                     ta, tr, tdp = extractDepthIndel(
                         tumorBam,
                         indel_chrom,
@@ -838,28 +862,10 @@ def callBam(params, processNo, chunkSize):
                         continue
                     if ta == 0:
                         continue
-                    """
-                    if ta > 1:
-                        germline_flag = False
-                        if germline:
-                            for var in germline.fetch(
-                                indel_chrom, indel_pos, indel_pos + 1
-                            ):
-                                for alt in var.alts:
-                                    offset = min(len(alt), len(var.ref)) - 1
-                                    pos_norm = var.pos + offset
-                                    ref_norm = var.ref[offset:]
-                                    alt_norm = alt[offset:]
-                                    if (
-                                        pos_norm == indel_pos + 1
-                                        and ref_norm == var.ref
-                                        and alt_norm == alt
-                                    ):
-                                        germline_flag = True
-                                        break
-                        if germline_flag:
-                            continue
-                    """
+                    if ta > params["maxAltCount"]:
+                        continue
+                    if IndelFilterByWindows(tumorBam,indel_chrom,indel_pos+1,5,params):
+                        continue
                     if normalBam:
                         na, nr, ndp = extractDepthIndel(
                             normalBam,
@@ -869,14 +875,17 @@ def callBam(params, processNo, chunkSize):
                             indel_alt,
                             params,
                         )
-                        if ndp - nr > params["maxAltCount"]:
+                        if ndp - nr > 0:
                             continue
                         if ndp < params["minNdepth"]:
                             continue
+                        if IndelFilterByWindows(normalBam,indel_chrom,indel_pos+1,5,params):
+                            continue
                     else:
                         na, nr, ndp = (0, 0, 0)
-                    if ta / tdp > params["maxAF"]:
-                        continue
+                        if ta / tdp > params["maxAF"]:
+                            continue
+                    """
                     indel_rec = {
                         "chrom": chromNow,
                         "pos": indel_pos + 1,
@@ -907,7 +916,7 @@ def callBam(params, processNo, chunkSize):
                             ),
                         },
                         "formats": ["AC", "RC", "DP"],
-                        "samples": [[ta, tr, tdp], [na, nr, ndp]],
+                        # "samples": [[ta, tr, tdp], [na, nr, ndp]],
                     }
                     muts_indels.append(indel_rec)
                     indel_dict[indel_str] = 1
@@ -985,6 +994,7 @@ def callBam(params, processNo, chunkSize):
                     mut_pos = mut_positions[nn]
                     mut_ref = num2base[ref_int[muts_ind[nn]]]
                     mut_alt = num2base[alt_int[muts_ind[nn]]]
+                    """
                     # if muts_dict.get(
                     # "_".join([mut_chrom, str(mut_pos), mut_ref, mut_alt])
                     # ):
@@ -996,35 +1006,28 @@ def callBam(params, processNo, chunkSize):
                     # continue
                     if ta == 0:
                         continue
-                    """
-                    if ta > 1:
-                        germline_flag = False
-                        if germline:
-                            for var in germline.fetch(mut_chrom, mut_pos - 1, mut_pos):
-                                if (
-                                    len(var.ref) == 1
-                                    and var.ref == mut_ref
-                                    and var.alts[0] == mut_alt
-                                ):
-                                    germline_flag = True
-                                    break
-                        if germline_flag:
-                            continue
-                    """
+                    if ta > params["maxAltCount"]:
+                        continue
                     if normalBam:
                         na, nr, ndp = extractDepthSnv(
-                            normalBam, mut_chrom, mut_pos, mut_ref, mut_alt, params
+                            normalBam,
+                            mut_chrom,
+                            mut_pos,
+                            mut_ref,
+                            mut_alt,
+                            params,
                         )
-                        if na > params["maxAltCount"]:
+                        if na > 0:
                             continue
                         if ndp < params["minNdepth"]:
                             continue
                     else:
                         na, nr, ndp = (0, 0, 0)
-                    if ta / tdp > params["maxAF"]:
-                        continue
+                        if ta / tdp > params["maxAF"]:
+                            continue
+                    """
 
-                    if readSet[0].is_forward:
+                    if readSet[0].template_length > 0:
                         readPos5p = min(
                             muts_ind[nn] + 1,
                             abs(readSet[0].template_length) - muts_ind[nn],
@@ -1064,7 +1067,7 @@ def callBam(params, processNo, chunkSize):
                             ),
                         },
                         "formats": ["AC", "RC", "DP"],
-                        "samples": [[ta, tr, tdp], [na, nr, ndp]],
+                        # "samples": [[ta, tr, tdp], [na, nr, ndp]],
                     }
                     muts_dict["_".join([mut_chrom, str(mut_pos), mut_ref, mut_alt])] = 0
                     muts.append(mut)
@@ -1077,18 +1080,117 @@ def callBam(params, processNo, chunkSize):
     """
     Calling block ends
     """
+    mut_dict = dict()
+    mut_pass_filter = []
+    for mut in muts:
+        chrom = mut["chrom"]
+        pos = mut["pos"]
+        ref = mut["ref"]
+        alt = mut["alt"]
+
+        if not mut_dict.get(":".join([chrom, str(pos), ref, alt])):
+            ta, tr, tdp = extractDepthSnv(tumorBam, chrom, pos, ref, alt, params)
+            window_filter = False
+            if IndelFilterByWindows(tumorBam, chrom, pos, 3, params):
+                window_filter = True
+            if normalBam:
+                na, nr, ndp = extractDepthSnv(normalBam, chrom, pos, ref, alt, params)
+                if IndelFilterByWindows(normalBam, chrom, pos, 3, params):
+                    window_filter = True
+            else:
+                na, nr, ndp = (0, 0, 0)
+            mut_dict[":".join([chrom, str(pos), ref, alt])] = (
+                ta,
+                tr,
+                tdp,
+                na,
+                nr,
+                ndp,
+                window_filter,
+            )
+        else:
+            ta, tr, tdp, na, nr, ndp, window_filter = mut_dict[
+                ":".join([chrom, str(pos), ref, alt])
+            ]
+        if window_filter:
+            continue
+        if ta > params["maxAltCount"]:
+            continue
+        if ta == 0:
+            continue
+        if normalBam:
+            if na > 0:
+                continue
+            if ndp < params["minNdepth"]:
+                continue
+        else:
+            if ta / tdp > params["maxAF"]:
+                continue
+        mut["samples"] = [[ta, tr, tdp], [na, nr, ndp]]
+        mut_pass_filter.append(mut)
+
+    muts_indels_dict = dict()
+    muts_indels_pass_filter = []
+    for mut in muts_indels:
+        chrom = mut["chrom"]
+        pos = mut["pos"]
+        ref = mut["ref"]
+        alt = mut["alt"]
+
+        if not muts_indels_dict.get(":".join([chrom, str(pos), ref, alt])):
+            ta, tr, tdp = extractDepthIndel(tumorBam, chrom, pos, ref, alt, params)
+            window_filter = False
+            if IndelFilterByWindows(tumorBam, chrom, pos, 3, params):
+                window_filter = True
+            if normalBam:
+                na, nr, ndp = extractDepthSnv(normalBam, chrom, pos, ref, alt, params)
+                if IndelFilterByWindows(normalBam, chrom, pos, 3, params):
+                    window_filter = True
+            else:
+                na, nr, ndp = (0, 0, 0)
+            muts_indels_dict[":".join([chrom, str(pos), ref, alt])] = (
+                ta,
+                tr,
+                tdp,
+                na,
+                nr,
+                ndp,
+                window_filter,
+            )
+        else:
+            ta, tr, tdp, na, nr, ndp, window_filter = muts_indels_dict[
+                ":".join([chrom, str(pos), ref, alt])
+            ]
+        if window_filter:
+            continue
+        if ta > params["maxAltCount"]:
+            continue
+        if ta == 0:
+            continue
+        if normalBam:
+            if ndp - nr > 0:
+                continue
+            if ndp < params["minNdepth"]:
+                continue
+        else:
+            if ta / tdp > params["maxAF"]:
+                continue
+        mut["samples"] = [[ta, tr, tdp], [na, nr, ndp]]
+        muts_indels_pass_filter.append(mut)
+
     if isLearn:
         return mismatch_dict, FPs, RPs
     print(
         f"Process {processNo} finished. Time: {(time.time()-starttime)/60: .2f} minutes"
     )
+
     return (
-        muts,
+        mut_pass_filter,
         total_coverage,
         recCount,
         duplex_count,
         duplex_read_num_dict,
-        muts_indels,
+        muts_indels_pass_filter,
         total_coverage_indel,
         unique_read_num,
         pass_read_num,

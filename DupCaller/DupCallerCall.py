@@ -4,16 +4,12 @@ import os
 import time
 from collections import OrderedDict
 from multiprocessing import Pool
-import subprocess
-import shutil
-from gzip import open as gzopen
 
 
 import matplotlib.patches as mpatches
 import numpy as np
 
 # import pysam
-from Bio import SeqIO
 from matplotlib import pyplot as plt
 from pysam import AlignmentFile as BAM
 
@@ -31,6 +27,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-g", "--germline", type=str, help="indexed germline vcf with AF field"
+    )
+    parser.add_argument(
+        "-gaf",
+        "--germlineAfCutoff",
+        type=str,
+        help="minimum population af to exclude a germline mutation",
+        default=0.001,
     )
     parser.add_argument("-f", "--reference", type=str, help="reference fasta file")
     parser.add_argument("-o", "--output", type=str, help="prefix of the output files")
@@ -91,14 +94,14 @@ if __name__ == "__main__":
         "--trimF",
         type=int,
         help="ignore mutation if it is less than n bps from ends of template",
-        default=30,
+        default=8,
     )
     parser.add_argument(
         "-tr",
         "--trimR",
         type=int,
         help="ignore mutation if it is less than n bps from ends of read",
-        default=15,
+        default=8,
     )
     parser.add_argument(
         "-d",
@@ -108,18 +111,18 @@ if __name__ == "__main__":
         default=10,
     )
     parser.add_argument(
-        "-ma",
+        "-maf",
         "--maxAF",
         type=float,
         help="maximum allele fraction to call a somatic mutation",
         default=1,
     )
     parser.add_argument(
-        "-nad",
+        "-mac",
         "--maxAltCount",
         type=int,
-        help="maximum allele count of alt allele in matched-normal",
-        default=0,
+        help="maximum allele count of alt allele",
+        default=100000,
     )
     parser.add_argument(
         "-mnv",
@@ -133,6 +136,14 @@ if __name__ == "__main__":
         "--panel",
         type=bool,
         help="enable panel region splitting. Must be set if the input data is from small targeted panel",
+        default=False,
+    )
+
+    parser.add_argument(
+        "-id",
+        "--indelbed",
+        type=str,
+        help="noise bed file for indels",
         default=False,
     )
     args = parser.parse_args()
@@ -154,12 +165,14 @@ if __name__ == "__main__":
         "pcutoff": args.threshold,
         "mapq": args.mapq,
         "noise": args.noise,
+        "indel_bed": args.indelbed,
         "trim5": args.trimF,
         "trim3": args.trimR,
         "minNdepth": args.minNdepth,
         "maxAltCount": args.maxAltCount,
         "maxAF": args.maxAF,
         "maxMnv": args.maxMNVlen,
+        "germline_cutoff": args.germlineAfCutoff,
     }
     if not params["normalBam"]:
         print(
@@ -174,8 +187,8 @@ if __name__ == "__main__":
     """
     Initialze run
     """
-    print("..............Loading reference genome.....................")
-    fasta = SeqIO.to_dict(SeqIO.parse(args.reference, "fasta"))
+    # print("..............Loading reference genome.....................")
+    # fasta = SeqIO.to_dict(SeqIO.parse(args.reference, "fasta"))
     startTime = time.time()
     if not os.path.exists("tmp"):
         os.mkdir("tmp")
@@ -192,7 +205,7 @@ if __name__ == "__main__":
         """
         print(".........Starting variant calling..............")
         paramsNow = params
-        paramsNow["reference"] = fasta
+        # paramsNow["reference"] = fasta
         regions = params["regions"]
         paramsNow["regions"] = [
             (chrom, 0, bamObject.get_reference_length(chrom) - 1) for chrom in regions
@@ -303,15 +316,17 @@ if __name__ == "__main__":
                     break
             # print(regions)
             chroms = [region[0] for region in regions]
-            fastaNow = {
-                chrom: fasta[chrom] for chrom in chroms
-            }  # Takes partial fasta to reduce memory usage
-            paramsNow = params
-            paramsNow["reference"] = fastaNow
+            # fastaNow = {
+            # chrom: fasta[chrom] for chrom in chroms
+            # }  # Takes partial fasta to reduce memory usage
+            # paramsNow = None
+            paramsNow = params.copy()
+            # paramsNow["reference"] = fastaNow
             paramsNow["regions"] = regions
-            callArgument = (paramsNow.copy(), nn, chunkSize)
+            callArgument = (paramsNow, nn, chunkSize)
             callArguments.append(callArgument)
             regions = []
+        del bamObject
         results = pool.starmap(callBam, callArguments)
         muts = [_[0] for _ in results]
         coverages = [_[1] for _ in results]
@@ -394,11 +409,12 @@ if __name__ == "__main__":
         ]
         coverage_bed = f"{args.output}/{args.output}_coverage.bed.gz"
 
-        with gzopen(coverage_bed, "w") as outfile:
-            for bed_file in coverage_beds:
-                with gzopen(bed_file, "r") as infile:
-                    shutil.copyfileobj(infile, outfile)
-        subprocess.run(["rm"] + coverage_beds)
+        # with gzopen(coverage_bed, "w") as outfile:
+        # for bed_file in coverage_beds:
+        # with gzopen(bed_file, "r") as infile:
+        # shutil.copyfileobj(infile, outfile)
+        # subprocess.run(["cat"]+ coverage_beds+[f"> {coverage_bed}"])
+        # subprocess.run(["rm"] + coverage_beds)
         # subprocess.run(["tabix",coverage_bed])
 
     tBam = BAM(args.bam, "rb")
@@ -510,7 +526,7 @@ if __name__ == "__main__":
             FPs_count[nn] = FPAll.count(nn + 1)
             RPs_count[nn] = RPAll.count(nn + 1)
         with open(
-            params["output"] + "/" + args.output + "_SBS_end_profile_call.txt", "w"
+            params["output"] + "/" + args.output + "_SBS_end_profile.txt", "w"
         ) as f:
             f.write("Distance\tMutations_fragment_end\tMutations_read_end\n")
             for nn in range(max(FPAll + RPAll)):
@@ -521,7 +537,7 @@ if __name__ == "__main__":
         plt.figure()
         plt.hist(RPAll, bins=range(0, max(RPAll)))
         plt.savefig(params["output"] + "/" + args.output + "_read_end_distance.png")
-        ACs = [_["samples"][0][0] > 1 for _ in mutsAll]
+        ACs = [_["samples"][0][0] for _ in mutsAll]
         plt.figure()
         plt.hist(ACs, bins=range(0, max(ACs)))
         plt.savefig(params["output"] + "/" + args.output + "_alt_read_count.png")
@@ -532,7 +548,7 @@ if __name__ == "__main__":
         clonal_num = 0
 
     with open(params["output"] + "/" + args.output + "_stats.txt", "w") as f:
-        f.write(f"Number of Unique Reads\t{unique_read_num}\n")
+        f.write(f"Number of Read Families\t{unique_read_num}\n")
         f.write(f"Number of Pass-filter Reads\t{pass_read_num}\n")
         f.write(f"Number of Effective Read Families\t{duplex_num}\n")
         f.write(f"Effective Coverage\t{coverage}\n")

@@ -282,6 +282,31 @@ def extractDepthIndel(bam, chrom, pos, ref, alt, params):
     return altAlleleCount, refAlleleCount, depth
 
 
+def IndelFilterByWindows(bam, chrom, pos, window, params):
+    has_indel = False
+    for pileupcolumn in bam.pileup(
+        chrom, pos - 1 - window, pos + window, min_base_quality=20, flag_filter=2816
+    ):
+        if (
+            pileupcolumn.reference_pos >= pos - 1 - window
+            and pileupcolumn.reference_pos <= pos + window
+            and pileupcolumn.pos != pos - 1
+        ):
+            for pileupread in pileupcolumn.pileups:
+                if (
+                    pileupread.is_del
+                    or pileupread.is_refskip
+                    or pileupread.alignment.is_secondary
+                    or pileupread.alignment.is_supplementary
+                    or pileupread.alignment.has_tag("DT")
+                    or pileupread.alignment.mapping_quality <= params["mapq"]
+                ):
+                    continue
+                if pileupread.indel != 0:
+                    has_indel = True
+    return has_indel
+
+
 def extractDepthRegion(bam, chrom, start, end, params):
     has_barcode = False
     for seq in bam.fetch(chrom, start, end):
@@ -440,10 +465,20 @@ def calculatePosterior(Pamp, Pref, Palt, prior_ref, prior_alt):
 
 
 def prepare_reference_mats(
-    chrom, start, end, reference_seq, germline_bed, noise_bed, nbam, tbam, params
+    chrom,
+    start,
+    end,
+    reference_seq,
+    germline_bed,
+    noise_bed,
+    indel_bed,
+    nbam,
+    tbam,
+    params,
 ):
     ### Define and Initialize
     af_miss = params["mutRate"]
+    af_cutoff = params["germline_cutoff"]
     m = end - start
     base2num = {"A": 0, "T": 1, "C": 2, "G": 3}
     snp_mask = np.full(m, False, dtype=bool)
@@ -469,27 +504,27 @@ def prepare_reference_mats(
                     if len(alt) == 1:
                         # prior_mat[ind, base2num[alt]] = afs[ii]
                         # has_snp = True
-                        if afs[ii] >= 0.001:
+                        if afs[ii] >= af_cutoff:
                             snp_mask[ind] = True
-                    elif afs[ii] >= 0.001:
+                    elif afs[ii] >= af_cutoff:
                         indel_mask[ind] = True
             if len(ref) != 1:
                 for ii, alt in enumerate(rec.alts):
                     if len(alt) == len(ref):
                         diff = np.array([a != b for a, b in zip(list(ref), list(alt))])
                         if ind >= 0:
-                            if afs[ii] >= 0.001:
+                            if afs[ii] >= af_cutoff:
                                 snp_mask[ind : ind + len(alt)][
                                     diff[: (snp_mask.size - ind)]
                                 ] = True
                         else:
-                            if afs[ii] >= 0.001:
+                            if afs[ii] >= af_cutoff:
                                 snp_mask[: min(snp_mask.size - ind, diff.size) + ind][
                                     diff[-ind : min(snp_mask.size - ind, diff.size)]
                                 ] = True
-                    if afs[ii] >= 0.001:
-                        indel_mask[max(ind, 0) : ind + len(alt)] = True
-    ### Preparep noise mask
+                    elif afs[ii] >= af_cutoff:
+                        indel_mask[max(ind, 0) : ind + len(ref)] = True
+    ### Prepare noise mask
     if noise_bed != None:
         for rec in noise_bed.fetch(chrom, start, end, parser=pysam.asBed()):
             interval_start = max(rec.start, start)
@@ -497,8 +532,15 @@ def prepare_reference_mats(
             interval_len = interval_end - interval_start
             interval_start_ind = interval_start - start
             noise_mask[interval_start_ind : interval_start_ind + interval_len] = True
+    if indel_bed != None:
+        for rec in indel_bed.fetch(chrom, start, end, parser=pysam.asBed()):
+            interval_start = max(rec.start, start)
+            interval_end = min(rec.end, end)
+            interval_len = interval_end - interval_start
+            interval_start_ind = interval_start - start
+            indel_mask[interval_start_ind : interval_start_ind + interval_len] = True
 
-    ### Preparep normal coverage mask
+    ### Prepare normal coverage mask
     if nbam:
         depth = extractDepthRegion(nbam, chrom, start, end, params)
         n_cov_mask = depth < params["minNdepth"]
@@ -511,7 +553,7 @@ def prepare_reference_mats(
 
 
 def determineTrimLength(seq, params, processed_flag):
-    if seq.is_forward:
+    if seq.template_length > 0:
         overlap = 0  # Never mask overlap of forward read
         left = params["trim5"]
         right_frag = params["trim5"] - min(
@@ -923,7 +965,7 @@ def genotypeDSIndel(seqs, bam, antimask, params):
                             ) / abs(indel_size)
                         f2r1_ref_seq_prob[nn] += mean_qual
                         f2r1_ref_count[nn] += 1
-    prior_ref = log10(np.ones(m) * (1 - params["mutRate"] / 35))
+    prior_ref = log10(np.ones(m) * (1 - params["mutRate"]) / 35)
     prior_alt = log10(np.ones(m) * params["mutRate"] / 35)
     Pamp = log10(np.ones(m) * prob_amp)
     F1R2_ref_prob, F1R2_alt_prob = calculatePosterior(
