@@ -1143,7 +1143,7 @@ def callBam(params, processNo, chunkSize):
             if IndelFilterByWindows(tumorBam, chrom, pos, 3, params):
                 window_filter = True
             if normalBam:
-                na, nr, ndp = extractDepthSnv(normalBam, chrom, pos, ref, alt, params)
+                na, nr, ndp = extractDepthIndel(normalBam, chrom, pos, ref, alt, params)
                 if IndelFilterByWindows(normalBam, chrom, pos, 3, params):
                     window_filter = True
             else:
