@@ -120,7 +120,7 @@ def countBamByStep(bam, region, step):
 def splitBamRegionsFine(bam, num, regions, contigs, threads):
     pool = Pool()
     cutSites = pool.starmap(
-        countBamByStep, ((bam, r, math.ceil(num / 10)) for r in regions)
+        countBamByStep, ((bam, r, math.ceil(num / 200)) for r in regions)
     )
     cutSites = [(contigs[0], 0)] + sum(cutSites, [])
     start = (contigs[0], 0)
