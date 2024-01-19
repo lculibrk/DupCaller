@@ -16,7 +16,6 @@ from pysam import AlignmentFile as BAM
 from DCutils.call import callBam
 from DCutils.funcs import createVcfStrings
 from DCutils.funcs import splitBamRegions
-from DCutils.funcs import splitBamRegionsFine
 
 if __name__ == "__main__":
     """
@@ -298,19 +297,7 @@ if __name__ == "__main__":
         regionSequence.append((contigs[site[0]], site[1]))
         for ii in range(site[0] + 1, len(contigs)):
             regionSequence.append((contigs[ii],))
-        regions_list = []
-        for nn in range(args.threads):
-            regions = []
-            while len(regionSequence) != 0:
-                if len(regionSequence[0]) != 3:
-                    regions.append(regionSequence.pop(0))
-                else:
-                    regions.append(regionSequence.pop(0))
-                    regions_list.append(regions)
-                    break
-        regions = splitBamRegionsFine(
-            args.bam, chunkSize, regions_list, contigs, args.threads
-        )
+
         """
         Start variant calling
         """
@@ -320,7 +307,6 @@ if __name__ == "__main__":
         print(".........Starting variant calling..............")
         pool = Pool()
         for nn in range(args.threads):
-            """
             regions = []
             while len(regionSequence) != 0:
                 if len(regionSequence[0]) != 3:
@@ -328,19 +314,18 @@ if __name__ == "__main__":
                 else:
                     regions.append(regionSequence.pop(0))
                     break
-            """
             # print(regions)
-            # chroms = [region[0] for region in regions]
+            chroms = [region[0] for region in regions]
             # fastaNow = {
             # chrom: fasta[chrom] for chrom in chroms
             # }  # Takes partial fasta to reduce memory usage
             # paramsNow = None
             paramsNow = params.copy()
             # paramsNow["reference"] = fastaNow
-            paramsNow["regions"] = regions[nn]
+            paramsNow["regions"] = regions
             callArgument = (paramsNow, nn, chunkSize)
             callArguments.append(callArgument)
-            # regions = []
+            regions = []
         del bamObject
         results = pool.starmap(callBam, callArguments)
         muts = [_[0] for _ in results]

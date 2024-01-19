@@ -14,6 +14,16 @@ from Bio import SeqIO
 from DCutils.funcs import *
 
 
+def bamIterateMultipleRegion(bam, regions):
+    bamObject = BAM(bam, "rb")
+    for region in regions:
+        for rec in bamObject.fetch(*region):
+            if len(region) >= 2:
+                if rec.reference_start < region[1]:
+                    continue
+            yield rec, region
+
+
 def callBam(params, processNo, chunkSize):
     # Get parameters
     bam = params["tumorBam"]

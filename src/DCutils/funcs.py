@@ -8,7 +8,6 @@ from pysam import TabixFile as BED
 from pysam import VariantFile as VCF
 from pysam import index as indexBam
 from scipy.stats import binom
-from multiprocessing import Pool
 
 
 def splitBamRegions(bam, num, contigs, fast=True):
@@ -88,74 +87,6 @@ def splitBamRegions(bam, num, contigs, fast=True):
                     cutSites += [(nn, rec.reference_start)]
                     currentReadNum = 0
         return cutSites, chunkSize
-
-
-def bamIterateMultipleRegion(bam, regions):
-    bamObject = BAM(bam, "rb")
-    for region in regions:
-        for rec in bamObject.fetch(*region):
-            if len(region) >= 2:
-                if rec.reference_start < region[1]:
-                    continue
-            yield rec, region
-
-
-def countBamByStep(bam, region, step):
-    count = 0
-    cutSites = list()
-    b = BAM(bam, "rb")
-    for rec, _ in bamIterateMultipleRegion(bam, region):
-        count += 1
-        if count == step:
-            count = 0
-            cutSites += [[rec.reference_name, rec.reference_start]]
-    leftover = count
-    if len(region) >= 1:
-        start = region[0][:2]
-    else:
-        start = [region[0][0], 0]
-    return [start] + cutSites[:-1]
-
-
-def splitBamRegionsFine(bam, num, regions, contigs, threads):
-    pool = Pool()
-    cutSites = pool.starmap(
-        countBamByStep, ((bam, r, math.ceil(num / 10)) for r in regions)
-    )
-    cutSites = [(contigs[0], 0)] + sum(cutSites, [])
-    start = (contigs[0], 0)
-    cutNo = len(cutSites)
-    region_no_per_thread = math.floor(cutNo / threads)
-    new_regions_list = []
-    current_cut = 0
-    for n, t in enumerate(range(threads)):
-        start = cutSites[n * region_no_per_thread]
-        new_regions = []
-        if n != threads - 1:
-            end = cutSites[(n + 1) * region_no_per_thread]
-            if start[0] == end[0]:
-                new_regions = [(start[0], start[1], end[1])]
-            else:
-                new_regions.append((start[0], start[1]))
-                if contigs.index(end[0]) - contigs.index(start[0]) != 1:
-                    new_regions += [
-                        (_,)
-                        for _ in contigs[
-                            contigs.index(start[0]) + 1 : contigs.index(end[0])
-                        ]
-                    ]
-                new_regions.append((end[0], 0, end[1]))
-        else:
-            if start[0] != contigs[-1]:
-                new_regions.append((start[0], start[1]))
-                if contigs.index(end[0]) - contigs.index(start[0]) != 1:
-                    new_regions += [
-                        (_,) for _ in contigs[contigs.index(start[0]) + 1 :]
-                    ]
-            else:
-                new_regions.append(start)
-        new_regions_list.append(new_regions)
-    return new_regions_list
 
 
 def findIndels(seq):
