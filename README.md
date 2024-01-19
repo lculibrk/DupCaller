@@ -6,7 +6,7 @@
 DupCaller is a universal tool for calling somatic mutations and calculating somatic mutational burden from barcoded error-corrected next generation sequencing (ecNGS) data with matched normal (e.x. NanoSeq).
 
 ## Prerequisites
-DupCaller requires python>=3.10 to run. Earlier versions may be sufficient to run DupCaller and have not been tested.
+DupCaller requires python>=3.10 to run. Earlier versions may be sufficient to run DupCaller but have not been tested.
 The complete DupCaller pipeline also requires the following tools for data preprocessing. The versions are used by the developer and other versions may or may not work.
 
 - BWA version 0.7.17 (https://bio-bwa.sourceforge.net)
@@ -85,8 +85,9 @@ DupCallerCall.py -b ${sample}.bam -f reference.fa -o {output_predix} -p {threads
 3. Deep sequencing of very small gene panels (e.x. less than 5 genes)
 
 ```bash
-DupCallerCall.py -b ${sample}.bam -f reference.fa -o {output_predix} -p {threads} -n {normal.bam} -g germline.vcf.gz -m noise_mask.bed.gz -x True
+DupCallerCall.py -b ${sample}.bam -f reference.fa -o {output_predix} -p 2 -n {normal.bam} -g germline.vcf.gz -m noise_mask.bed.gz 
 ```
+Note that since DupCaller partition jobs based on genomic regions, multithreading capability will be significantly compromised for small targeted panel. In this case we suggest to run at most one thread per distince targeted region
 
 Please see "Parameters" section for explanation of all parameters. See "Results" section for descriptions of all result files in the output folder
 
@@ -113,10 +114,11 @@ These options should be understood by user and customized accordingly. Some of t
 | -p | --threads | number of threads | 1 |
 | -n | --normalBam | bam file of matched normal. When matched normal is not available, set the maximum allele frequency (-ma) to an appropriate value (e.x. 0.3) | None |
 | -m | --noise | a bed interval file that masked noisy positions | None |
-| -ma | --maxAF | maximum allele fraction to call a somatic mutation. Must be set to appropriate value when a matched normal (-n) is not available | 1 |
+| -maf | --maxAF | maximum allele fraction to call a somatic mutation. Must be set to appropriate value when a matched normal (-n) is not available | 1 |
+| -mac | --maxAltCount | maximum allele count of alt allele | 100000 |
 | -tt | --trimF | ignore mutation if it is less than n bps from ends of template | 30 |
 | -tr | --trimR | ignore mutation if it is less than n bps from ends of read | 15 |
-| -x | --panel | True or False. Enable panel region splitting. Recommended for small panels | False |
+| -id | --indelBed | an indel enhanced panel of normal (ePoN) used for indel calling | None | 
 
 **Advanced**
 
@@ -132,6 +134,7 @@ These are variant calling parameters and adjustment is unnecessary for general u
 | -d | --minNdepth | minumum coverage in normal for called variants | 10 |
 | -nad | --maxAltCount | maximum allele count of alt allele in matched-normal | 0 |
 | -mnv | --maxMNVlen | maximum length of MNV for mutation calls | 2 |
+| -gaf | --germlineAfCutoff | locations at which there is a germline mutation with population af larger than this threshold will be skipped | 0.001 |
 
 #### Results
 
@@ -139,13 +142,13 @@ snv.vcf:
 vcf of detected single nucleotide mutations in the sample. The vcf also includes multiple nucleotide mutations (MNVs).
 
 snv_burden.txt:
-naive burden and least-square snv burden estimation of the samples with 95% confidence interval. Information for least-square burden can be found at...
+naive burden and least-square snv burden estimation of the samples with 95% confidence interval.
 
 indel.vcf:
 vcf of detected short insertion/deletion (indel) mutations in the sample.
 
-snv_burden.txt:
-naive indel burden estimation in sample.
+indel_burden.txt:
+Indel burden estimation in sample.
 
 ## Citation
 
