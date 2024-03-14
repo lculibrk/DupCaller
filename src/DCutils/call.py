@@ -119,8 +119,6 @@ def callBam(params, processNo, chunkSize):
             )
 
             currentCheckPoint += 1000000
-        # if rec.query_name.endswith("CCC+TGA") or rec.query_name.endswith("TGA+CCC"):
-        # print(rec)
         if (
             rec.is_supplementary
             or rec.is_secondary
@@ -129,8 +127,6 @@ def callBam(params, processNo, chunkSize):
             or rec.is_qcfail
         ):
             continue
-        # if rec.query_name.endswith("CCC+TGA") or rec.query_name.endswith("TGA+CCC"):
-        # print(1)
         # if rec.get_tag("AS") - rec.get_tag("XS") <= 50:
         # continue
         pass_read_num += 1
@@ -1177,9 +1173,30 @@ def callBam(params, processNo, chunkSize):
                 continue
         mut["samples"] = [[ta, tr, tdp], [na, nr, ndp]]
         muts_indels_pass_filter.append(mut)
-
+    
     if isLearn:
         return mismatch_dict, FPs, RPs
+    
+    if "coverage" in locals():
+        non_zero_positions = np.nonzero(coverage + coverage_indel)
+        for pos in non_zero_positions[0].tolist():
+            locus_bed.write(
+                (
+                    "\t".join(
+                        [
+                            reference_mat_chrom,
+                            str(pos + reference_mat_start),
+                            str(pos + 1 + reference_mat_start),
+                            str(coverage[pos]),
+                            str(coverage_indel[pos]),
+                        ]
+                    )
+                    + "\n"
+                ).encode("utf-8")
+            )
+        total_coverage += np.sum(coverage)
+        total_coverage_indel += np.sum(coverage_indel)
+        
     print(
         f"Process {processNo} finished. Time: {(time.time()-starttime)/60: .2f} minutes"
     )

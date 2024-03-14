@@ -540,16 +540,18 @@ if __name__ == "__main__":
             f.write("Distance\tMutations_fragment_end\tMutations_read_end\n")
             for nn in range(max(FPAll + RPAll)):
                 f.write(f"{nn+1}\t{FPs_count[nn]}\t{RPs_count[nn]}\n")
+        ACs = [_["samples"][0][0] for _ in mutsAll]
+        """
         plt.figure()
         plt.hist(FPAll, bins=range(0, max(FPAll)))
         plt.savefig(params["output"] + "/" + args.output + "_fragment_end_distance.png")
         plt.figure()
         plt.hist(RPAll, bins=range(0, max(RPAll)))
         plt.savefig(params["output"] + "/" + args.output + "_read_end_distance.png")
-        ACs = [_["samples"][0][0] for _ in mutsAll]
         plt.figure()
         plt.hist(ACs, bins=range(0, max(ACs)))
         plt.savefig(params["output"] + "/" + args.output + "_alt_read_count.png")
+        """
         ACs_clonal = [_ for _ in ACs if _ > 1]
         clonal_num = len(ACs_clonal)
     else:

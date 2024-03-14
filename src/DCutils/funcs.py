@@ -553,7 +553,7 @@ def prepare_reference_mats(
 
 
 def determineTrimLength(seq, params, processed_flag):
-    if seq.template_length > 0:
+    if seq.template_length > 0 and not processed_flag:
         overlap = 0  # Never mask overlap of forward read
         left = params["trim5"]
         right_frag = params["trim5"] - min(
