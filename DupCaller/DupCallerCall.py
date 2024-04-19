@@ -17,6 +17,7 @@ from pysam import AlignmentFile as BAM
 from DCutils.call import callBam
 from DCutils.funcs import createVcfStrings
 from DCutils.funcs import splitBamRegions
+from DCutils.funcs import getAlignmentObject
 
 if __name__ == "__main__":
     """
@@ -203,7 +204,7 @@ if __name__ == "__main__":
         except OSError as e:
             if e.errno != errno.EEXIST:
                 raise 
-    bamObject = BAM(args.bam, "rb")
+    bamObject = getAlignmentObject(args.bam, args.reference)
 
     """
     Execulte variant calling
@@ -426,7 +427,7 @@ if __name__ == "__main__":
         # subprocess.run(["rm"] + coverage_beds)
         # subprocess.run(["tabix",coverage_bed])
 
-    tBam = BAM(args.bam, "rb")
+    tBam = getAlignmentObject(args.bam, args.reference)
     contigs = tBam.references
     # print(contigs)
     chromDict = {contig: tBam.get_reference_length(contig) for contig in contigs}
