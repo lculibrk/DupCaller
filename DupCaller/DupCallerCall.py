@@ -150,6 +150,19 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    ## If the user points to an absolute output path, it will make a giant path under tmp/
+    ## Quick check if params["output"] starts is an absolute path pointing to the working directory, and changes it to a non-absolute path. 
+    ## Otherwise, keeps the large path.
+    cwd = os.getcwd()
+    if args.output.startswith(cwd):
+        abs_path = args.output
+        outpath = abs_path.replace(cwd, "")
+        ## Make sure we don't end up with a root path
+        if outpath.startswith("/"):
+            outpath = outpath[1:]
+    else:
+        outpath = args.output
+
     """
     Store Parameters
     """
@@ -158,7 +171,7 @@ if __name__ == "__main__":
         "normalBam": args.normalBam,
         "germline": args.germline,
         "reference": args.reference,
-        "output": args.output,
+        "output": outpath,
         "regions": args.regions,
         "threads": args.threads,
         "amperr": args.amperrs,
@@ -192,19 +205,7 @@ if __name__ == "__main__":
     # print("..............Loading reference genome.....................")
     # fasta = SeqIO.to_dict(SeqIO.parse(args.reference, "fasta"))
     startTime = time.time()
-    ## If the user points to an absolute output path, it will make a giant path under tmp/
-    ## Quick check if params["output"] starts with the working directory
-    cwd = os.getcwd()
-    if params["output"].startswith(cwd):
-        abs_path = params["output"]
-        outpath = abs_path.replace(cwd, "")
-        ## Make sure we don't end up with a root path
-        if outpath.startswith("/"):
-            outpath = outpath[1:]
-    else:
-        outpath = params["output"]
-
-    if not os.path.exists("tmp"):
+    if not os.path.exists(os.path.join("tmp", outpath)):
         try:
             os.makedirs(os.path.join("tmp", outpath))
         except OSError as e:
@@ -217,7 +218,6 @@ if __name__ == "__main__":
             if e.errno != errno.EEXIST:
                 raise 
     bamObject = getAlignmentObject(args.bam, args.reference)
-
     """
     Execulte variant calling
     """
