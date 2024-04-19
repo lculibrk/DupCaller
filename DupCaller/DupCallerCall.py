@@ -471,7 +471,7 @@ if __name__ == "__main__":
     pass_duprate = unique_read_num / pass_read_num
 
     with open(
-        args.output + "_duplex_group_stats.txt", "w"
+        outpath + "_duplex_group_stats.txt", "w"
     ) as f:
         f.write(
             "duplex_group_strand_composition\tduplex_group_number\t\
@@ -500,7 +500,7 @@ if __name__ == "__main__":
             )
 
     muts_by_group = np.loadtxt(
-        args.output + "_duplex_group_stats.txt",
+        outpath + "_duplex_group_stats.txt",
         skiprows=1,
         dtype=float,
         delimiter="\t",
@@ -539,7 +539,7 @@ if __name__ == "__main__":
     lgd2 = mpatches.Patch(color="blue", label="Naive")
     plt.legend(handles=[lgd1, lgd2])
     plt.savefig(
-        args.output + "_burden_by_duplex_group_size.png"
+        outpath + "_burden_by_duplex_group_size.png"
     )
     if len(FPAll + RPAll) != 0:
         FPs_count = [0 for _ in range(max(FPAll + RPAll))]
@@ -548,7 +548,7 @@ if __name__ == "__main__":
             FPs_count[nn] = FPAll.count(nn + 1)
             RPs_count[nn] = RPAll.count(nn + 1)
         with open(
-            args.output + "_SBS_end_profile.txt", "w"
+            outpath + "_SBS_end_profile.txt", "w"
         ) as f:
             f.write("Distance\tMutations_fragment_end\tMutations_read_end\n")
             for nn in range(max(FPAll + RPAll)):
@@ -571,7 +571,7 @@ if __name__ == "__main__":
         print(f"No mutations detected.")
         clonal_num = 0
 
-    with open(args.output + "_stats.txt", "w") as f:
+    with open(outpath + "_stats.txt", "w") as f:
         f.write(f"Number of Read Families\t{unique_read_num}\n")
         f.write(f"Number of Pass-filter Reads\t{pass_read_num}\n")
         f.write(f"Number of Effective Read Families\t{duplex_num}\n")
@@ -583,7 +583,7 @@ if __name__ == "__main__":
         )
         f.write(f"Efficiency\t{efficiency}\n")
 
-    with open(args.output + "_snv_burden.txt", "w") as f:
+    with open(outpath + "_snv_burden.txt", "w") as f:
         f.write(f"Number of Mutations\t{muts_num}\n")
         f.write(f"Number of multi-clonal Mutations\t{clonal_num}\n")
         f.write(f"Estimated Naive Burden\t{burden_naive}\n")
@@ -591,7 +591,7 @@ if __name__ == "__main__":
         f.write(f"Least-square Burden Upper 95% CI\t{burden_lstsq_uci}\n")
         f.write(f"Least-square Burden Lower 95% CI\t{burden_lstsq_lci}\n")
 
-    with open(args.output + "_indel_burden.txt", "w") as f:
+    with open(outpath + "_indel_burden.txt", "w") as f:
         f.write(f"Number of Mutations\t{indels_num}\n")
         f.write(f"Effective Coverage\t{coverage+coverage_indel}\n")
         f.write(f"Estimated Naive Burden\t{indel_burden}\n")
